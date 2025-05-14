@@ -262,6 +262,9 @@ If authentication is successful, the server responds:
 ### Get Ledger Balances
 
 Retrieves the balances of all participants in a specific ledger account.
+- AccountID for unified balance is `asset+participant_address`, for example `"usdc0x123..."`.
+- AccountID for balance in a specific channel is `channelID`.
+- AccountID for balance in a specific virtual app is `vAppID`.
 
 **Request:**
 
