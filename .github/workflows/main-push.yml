@@ -1,0 +1,25 @@
+name: Push on main branch
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  auto-tag:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Run auto tag script
+        run: |
+          git config user.name "GitHub Actions"
+          git config user.email "github-actions@github.com"
+          
+          ./scripts/auto_tag.sh
