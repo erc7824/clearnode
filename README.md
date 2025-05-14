@@ -22,7 +22,7 @@ sequenceDiagram
     participant C2 as Charlie
     participant CN as Clearnode (Bob)
     participant BC as Blockchain
-    
+
     C1->>BC: Create Channel with Clearnode
     BC->>CN: Channel Creation Event
     CN->>CN: Credit Alice Ledger Account
@@ -35,22 +35,22 @@ sequenceDiagram
     CN-->>C1: Challenge
     C1->>CN: Auth Verification (with signature)
     CN-->>C1: Auth Success
-    
+
     C2->>CN: Authentication Request
     CN-->>C2: Challenge
     C2->>CN: Auth Verification (with signature)
     CN-->>C2: Auth Success
-    
+
     C1->>CN: Create Virtual Application (with signatures)
     CN->>CN: Verify Signatures & Update Balances
     CN-->>C1: Virtual App Created
     CN-->>C2: Virtual App Created
-    
+
     C1->>CN: Close Virtual App (with signatures)
     CN->>CN: Verify Signatures & Update Ledger
     CN-->>C1: Virtual App Closed
     CN-->>C2: Virtual App Closed
-    
+
     C1->>CN: Request Close Channel
     CN-->>C1: Return Signed Body with Allocations
     C1->>BC: Submit Close Channel
