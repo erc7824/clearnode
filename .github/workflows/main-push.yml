@@ -25,11 +25,12 @@ jobs:
           
           ./scripts/auto_tag.sh
       
-      - name: Get the new tag
+      - name: Get the new tag without 'v' prefix
         id: tagger
         run: |
           NEW_TAG=$(git describe --tags --abbrev=0)
-          echo "new_tag=$NEW_TAG" >> $GITHUB_OUTPUT
+          NEW_TAG_WITHOUT_V=${NEW_TAG#v}
+          echo "new_tag=$NEW_TAG_WITHOUT_V" >> $GITHUB_OUTPUT
       
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v2
