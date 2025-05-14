@@ -541,3 +541,167 @@ func TestHandleGetConfig(t *testing.T) {
 
 	assert.Equal(t, BrokerAddress, configMap.BrokerAddress)
 }
+
+// TestHandleGetChannels tests the get channels functionality
+func TestHandleGetChannels(t *testing.T) {
+	rawKey, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	signer := Signer{privateKey: rawKey}
+	participantAddr := signer.GetAddress().Hex()
+
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	ledger := NewLedger(db)
+
+	tokenAddress := "0xToken123"
+	networkID := "137"
+
+	channels := []Channel{
+		{
+			ChannelID:    "0xChannel1",
+			ParticipantA: participantAddr,
+			ParticipantB: BrokerAddress,
+			Status:       ChannelStatusOpen,
+			Token:        tokenAddress,
+			NetworkID:    networkID,
+			Amount:       1000,
+			Nonce:        1,
+			CreatedAt:    time.Now().Add(-24 * time.Hour), // 1 day ago
+			UpdatedAt:    time.Now(),
+		},
+		{
+			ChannelID:    "0xChannel2",
+			ParticipantA: participantAddr,
+			ParticipantB: BrokerAddress,
+			Status:       ChannelStatusClosed,
+			Token:        tokenAddress,
+			NetworkID:    networkID,
+			Amount:       2000,
+			Nonce:        2,
+			CreatedAt:    time.Now().Add(-12 * time.Hour), // 12 hours ago
+			UpdatedAt:    time.Now(),
+		},
+		{
+			ChannelID:    "0xChannel3",
+			ParticipantA: participantAddr,
+			ParticipantB: BrokerAddress,
+			Status:       ChannelStatusJoining,
+			Token:        tokenAddress,
+			NetworkID:    networkID,
+			Amount:       3000,
+			Nonce:        3,
+			CreatedAt:    time.Now().Add(-6 * time.Hour), // 6 hours ago
+			UpdatedAt:    time.Now(),
+		},
+	}
+
+	for _, channel := range channels {
+		require.NoError(t, db.Create(&channel).Error)
+	}
+
+	otherChannel := Channel{
+		ChannelID:    "0xOtherChannel",
+		ParticipantA: "0xOtherParticipant",
+		ParticipantB: BrokerAddress,
+		Status:       ChannelStatusOpen,
+		Token:        tokenAddress,
+		NetworkID:    networkID,
+		Amount:       5000,
+		Nonce:        4,
+		CreatedAt:    time.Now(),
+		UpdatedAt:    time.Now(),
+	}
+	require.NoError(t, db.Create(&otherChannel).Error)
+
+	params := map[string]string{
+		"participant": participantAddr,
+	}
+	paramsJSON, err := json.Marshal(params)
+	require.NoError(t, err)
+
+	rpcRequest := &RPCRequest{
+		Req: RPCData{
+			RequestID: 123,
+			Method:    "get_channels",
+			Params:    []any{json.RawMessage(paramsJSON)},
+			Timestamp: uint64(time.Now().Unix()),
+		},
+	}
+
+	reqBytes, err := json.Marshal(rpcRequest.Req)
+	require.NoError(t, err)
+	signed, err := signer.Sign(reqBytes)
+	require.NoError(t, err)
+	rpcRequest.Sig = []string{hexutil.Encode(signed)}
+
+	response, err := HandleGetChannels(rpcRequest, ledger)
+	require.NoError(t, err)
+	require.NotNil(t, response)
+
+	assert.Equal(t, "get_channels", response.Res.Method)
+	assert.Equal(t, uint64(123), response.Res.RequestID)
+
+	require.Len(t, response.Res.Params, 1, "Response should contain a slice of ChannelResponse")
+	channelsSlice, ok := response.Res.Params[0].([]ChannelResponse)
+	require.True(t, ok, "Response parameter should be a slice of ChannelResponse")
+
+	// Should return all 3 channels for the participant
+	assert.Len(t, channelsSlice, 3, "Should return all 3 channels for the participant")
+
+	// Verify the channels are ordered by creation date (newest first)
+	assert.Equal(t, "0xChannel3", channelsSlice[0].ChannelID, "First channel should be the newest")
+	assert.Equal(t, "0xChannel2", channelsSlice[1].ChannelID, "Second channel should be the middle one")
+	assert.Equal(t, "0xChannel1", channelsSlice[2].ChannelID, "Third channel should be the oldest")
+
+	// Verify channel data is correct
+	for _, ch := range channelsSlice {
+		assert.Equal(t, participantAddr, ch.Participant, "ParticipantA should match")
+		assert.Equal(t, tokenAddress, ch.Token, "Token should match")
+		assert.Equal(t, networkID, ch.NetworkID, "NetworkID should match")
+
+		// Find the corresponding original channel to compare with
+		var originalChannel Channel
+		for _, c := range channels {
+			if c.ChannelID == ch.ChannelID {
+				originalChannel = c
+				break
+			}
+		}
+
+		assert.Equal(t, originalChannel.Status, ch.Status, "Status should match")
+		assert.Equal(t, originalChannel.Amount, ch.Amount, "Amount should match")
+		assert.NotEmpty(t, ch.CreatedAt, "CreatedAt should not be empty")
+		assert.NotEmpty(t, ch.UpdatedAt, "UpdatedAt should not be empty")
+	}
+
+	// Test with invalid signature
+	invalidReq := &RPCRequest{
+		Req: RPCData{
+			RequestID: 456,
+			Method:    "get_channels",
+			Params:    []any{json.RawMessage(paramsJSON)},
+			Timestamp: uint64(time.Now().Unix()),
+		},
+		Sig: []string{"0xInvalidSignature"},
+	}
+
+	_, err = HandleGetChannels(invalidReq, ledger)
+	assert.Error(t, err, "Should return error with invalid signature")
+	assert.Contains(t, err.Error(), "invalid signature", "Error should mention invalid signature")
+
+	// Test with missing participant parameter
+	missingParamReq := &RPCRequest{
+		Req: RPCData{
+			RequestID: 789,
+			Method:    "get_channels",
+			Params:    []any{map[string]string{}}, // Empty map
+			Timestamp: uint64(time.Now().Unix()),
+		},
+		Sig: []string{hexutil.Encode(signed)},
+	}
+
+	_, err = HandleGetChannels(missingParamReq, ledger)
+	assert.Error(t, err, "Should return error with missing participant")
+	assert.Contains(t, err.Error(), "missing participant", "Error should mention missing participant")
+}

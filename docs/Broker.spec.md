@@ -76,6 +76,7 @@ The broker protocol is a system for managing payment channels and virtual applic
 | `get_config` | Retrieves broker configuration |
 | `get_app_definition` | Retrieves application definition for a ledger account |
 | `get_ledger_balances` | Lists participants and their balances for a ledger account |
+| `get_channels` | Lists all channels for a participant with their status |
 | `create_app_session` | Creates a new virtual application on a ledger |
 | `close_app_session` | Closes a virtual application |
 | `close_channel` | Closes a payment channel |
@@ -286,6 +287,51 @@ Retrieves the balances of all participants in a specific ledger account.
     {
       "address": "0x2345678901abcdef...",
       "amount": 200000
+    }
+  ]], 1619123456789],
+  "sig": ["0xabcd1234..."]
+}
+```
+
+### Get Channels
+
+Retrieves all channels for a participant (both open, closed, and joining), ordered by creation date (newest first).
+
+**Request:**
+
+```json
+{
+  "req": [3, "get_channels", [{
+    "participant": "0x1234567890abcdef..."
+  }], 1619123456789],
+  "sig": ["0x9876fedcba..."]
+}
+```
+
+**Response:**
+
+```json
+{
+  "res": [3, "get_channels", [[
+    {
+      "channel_id": "0xfedcba9876543210...",
+      "participant": "0x1234567890abcdef...",
+      "status": "open",
+      "token": "0xeeee567890abcdef...",
+      "amount": 100000,
+      "network_id": "137",
+      "created_at": "2023-05-01T12:00:00Z",
+      "updated_at": "2023-05-01T12:30:00Z"
+    },
+    {
+      "channel_id": "0xabcdef1234567890...",
+      "participant": "0x1234567890abcdef...",
+      "status": "closed",
+      "token": "0xeeee567890abcdef...",
+      "amount": 50000,
+      "network_id": "137",
+      "created_at": "2023-04-15T10:00:00Z",
+      "updated_at": "2023-04-20T14:30:00Z"
     }
   ]], 1619123456789],
   "sig": ["0xabcd1234..."]

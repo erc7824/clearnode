@@ -124,6 +124,19 @@ type CloseChannelResponse struct {
 	Signature        Signature    `json:"server_signature"`
 }
 
+// ChannelResponse represents a channel's details in the response
+type ChannelResponse struct {
+	ChannelID   string        `json:"channel_id"`
+	Participant string        `json:"participant"`
+	Status      ChannelStatus `json:"status"`
+	Token       string        `json:"token"`
+	// Total amount in the channel (user + broker)
+	Amount    int64  `json:"amount"`
+	NetworkID string `json:"network_id"`
+	CreatedAt string `json:"created_at"`
+	UpdatedAt string `json:"updated_at"`
+}
+
 type Signature struct {
 	V uint8  `json:"v,string"`
 	R string `json:"r,string"`
@@ -719,6 +732,67 @@ func HandleCloseChannel(rpc *RPCRequest, ledger *Ledger, signer *Signer) (*RPCRe
 	}
 
 	rpcResponse := CreateResponse(rpc.Req.RequestID, rpc.Req.Method, []any{response}, time.Now())
+	return rpcResponse, nil
+}
+
+// HandleGetChannels returns a list of channels for a given account
+// TODO: add filters, pagination, etc.
+func HandleGetChannels(rpc *RPCRequest, ledger *Ledger) (*RPCResponse, error) {
+	var participant string
+
+	if len(rpc.Req.Params) > 0 {
+		paramsJSON, err := json.Marshal(rpc.Req.Params[0])
+		if err == nil {
+			var params map[string]string
+			if err := json.Unmarshal(paramsJSON, &params); err == nil {
+				participant = params["participant"]
+			}
+		}
+	}
+
+	if participant == "" {
+		return nil, errors.New("missing participant parameter")
+	}
+
+	reqBytes, err := json.Marshal(rpc.Req)
+	if err != nil {
+		return nil, errors.New("error serializing message")
+	}
+
+	isValid, err := ValidateSignature(reqBytes, rpc.Sig[0], participant)
+	if err != nil || !isValid {
+		return nil, errors.New("invalid signature")
+	}
+
+	var channelResponses []ChannelResponse
+
+	err = ledger.db.Transaction(func(tx *gorm.DB) error {
+		channels, err := getChannelsForParticipant(tx, participant)
+		if err != nil {
+			return fmt.Errorf("failed to get channels: %w", err)
+		}
+
+		for _, channel := range channels {
+			channelResponses = append(channelResponses, ChannelResponse{
+				ChannelID:   channel.ChannelID,
+				Participant: channel.ParticipantA,
+				Status:      channel.Status,
+				Token:       channel.Token,
+				Amount:      channel.Amount,
+				NetworkID:   channel.NetworkID,
+				CreatedAt:   channel.CreatedAt.Format(time.RFC3339),
+				UpdatedAt:   channel.UpdatedAt.Format(time.RFC3339),
+			})
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		return nil, err
+	}
+
+	rpcResponse := CreateResponse(rpc.Req.RequestID, rpc.Req.Method, []any{channelResponses}, time.Now())
 	return rpcResponse, nil
 }
 
