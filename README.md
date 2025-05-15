@@ -14,7 +14,8 @@ Clearnode is an implementation of a message broker node providing ledger service
 
 ### Communication Protocol
 
-For detailed protocol description, see the [Broker Protocol Specification](docs/Broker.spec.md).
+- [Protocol Specification](docs/Clearnode.protocol.md): Describes the protocol architecture and message format
+- [API Reference](docs/API.md): Detailed API endpoint documentation
 
 ```mermaid
 sequenceDiagram
