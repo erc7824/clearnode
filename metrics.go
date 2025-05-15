@@ -151,7 +151,7 @@ func (m *Metrics) UpdateChannelMetrics(db *gorm.DB) {
 // UpdateAppSessionMetrics updates the application session metrics from the database
 func (m *Metrics) UpdateAppSessionMetrics(db *gorm.DB) {
 	var count int64
-	db.Model(&VApp{}).Count(&count)
+	db.Model(&AppSession{}).Count(&count)
 	m.AppSessionsTotal.Set(float64(count))
 }
 

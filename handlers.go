@@ -27,17 +27,17 @@ type AppDefinition struct {
 	Nonce        uint64   `json:"nonce,omitempty"`
 }
 
-// CreateApplicationParams represents parameters needed for virtual app creation
-type CreateApplicationParams struct {
+// CreateAppSessionParams represents parameters needed for virtual app creation
+type CreateAppSessionParams struct {
 	Definition  AppDefinition `json:"definition"`
-	Token       string        `json:"token"`
-	Allocations []int64       `json:"allocations"`
+	Allocations []*big.Int    `json:"allocations"`
+	Assets      []string      `json:"asset_ids"`
 }
 
 type CreateAppSignData struct {
 	RequestID uint64
 	Method    string
-	Params    []CreateApplicationParams
+	Params    []CreateAppSessionParams
 	Timestamp uint64
 }
 
@@ -46,16 +46,17 @@ func (r CreateAppSignData) MarshalJSON() ([]byte, error) {
 	return json.Marshal(arr)
 }
 
-// CloseApplicationParams represents parameters needed for virtual app closure
-type CloseApplicationParams struct {
-	AppID            string  `json:"app_id"`
-	FinalAllocations []int64 `json:"allocations"`
+// CloseAppSessionParams represents parameters needed for virtual app closure
+type CloseAppSessionParams struct {
+	AppSessionID string     `json:"app_session_id"`
+	Allocations  []*big.Int `json:"allocations"`
+	Assets       []string   `json:"asset_ids"`
 }
 
 type CloseAppSignData struct {
 	RequestID uint64
 	Method    string
-	Params    []CloseApplicationParams
+	Params    []CloseAppSessionParams
 	Timestamp uint64
 }
 
@@ -64,10 +65,10 @@ func (r CloseAppSignData) MarshalJSON() ([]byte, error) {
 	return json.Marshal(arr)
 }
 
-// AppResponse represents response data for application operations
-type AppResponse struct {
-	AppID  string `json:"app_id"`
-	Status string `json:"status"`
+// AppSessionResponse represents response data for application operations
+type AppSessionResponse struct {
+	AppSessionID string `json:"app_session_id"`
+	Status       string `json:"status"`
 }
 
 // ResizeChannelParams represents parameters needed for resizing a channel
@@ -141,12 +142,6 @@ type Signature struct {
 	V uint8  `json:"v,string"`
 	R string `json:"r,string"`
 	S string `json:"s,string"`
-}
-
-// AvailableBalance represents a participant's availability for virtual apps
-type AvailableBalance struct {
-	Address string `json:"address"`
-	Amount  int64  `json:"amount"`
 }
 
 // BrokerConfig represents the broker configuration information
