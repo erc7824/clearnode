@@ -1,0 +1,51 @@
+config:
+  args: ["sleep", "infinity"]
+  logLevel: info
+  database:
+    driver: postgres
+    url: ""
+  envSecret: ""
+
+image:
+  repository: ghcr.io/erc7824/clearnode
+  tag: 0.0.1
+
+service:
+  http:
+    enabled: true
+    port: 8000
+    path: /
+
+metrics:
+  enabled: false
+  podmonitoring:
+    enabled: true
+  port: 4242
+  endpoint: "/metrics"
+
+resources:
+  limits:
+    cpu: 100m
+    memory: 256Mi
+    ephemeral-storage: 100Mi
+  requests:
+    cpu: 100m
+    memory: 256Mi
+    ephemeral-storage: 100Mi
+
+autoscaling:
+  enabled: false
+
+
+networking:
+  externalHostname: clearnet.yellow.com
+  tlsClusterIssuer: zerossl-prod
+  gateway:
+    enabled: false
+  ingress:
+    enabled: true
+    className: nginx
+    tls:
+      enabled: true
+
+imagePullSecret: ghcr-pull
