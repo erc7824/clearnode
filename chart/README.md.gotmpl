@@ -1,0 +1,55 @@
+# {{ template "chart.name" . }}
+
+{{ template "chart.versionBadge" . }}
+
+{{ template "chart.description" . }}
+
+## Prerequisites
+
+- Kubernetes 1.24+
+- Helm 3.0+
+- For TLS: cert-manager installed in the cluster
+
+## Installing the Chart
+
+To install the chart with the release name `my-release`:
+```bash
+helm install my-release git+https://github.com/erc7824/clearnode@chart?ref=main
+```
+
+The command deploys Clearnode on the Kubernetes cluster with default configuration. The [Parameters](#parameters) section lists the parameters that can be configured during installation.
+
+## Uninstalling the Chart
+
+To uninstall/delete the `my-release` deployment:
+```bash
+helm delete my-release
+```
+
+## Parameters
+
+{{ template "chart.valuesTable" . }}
+
+## Gateway Configuration
+
+By default, the chart creates an API Gateway and configures it to use TLS via cert-manager. To use this feature:
+
+1. Create a cert-manager ClusterIssuer
+2. Configure `gateway.tlsClusterIssuer` with the issuer name
+3. Set `gateway.externalHostname` to your domain name
+
+## Troubleshooting
+
+### Common Issues
+
+- **Database Connection Issues**: Ensure the database connection URL is correct and the database is accessible from the cluster
+- **TLS Certificate Issues**: Check cert-manager logs for problems with certificate issuance
+- **Blockchain Connection Issues**: Verify RPC endpoint URLs are correct and accessible
+
+For more detailed debugging, check the application logs:
+
+```bash
+kubectl logs -l app=clearnode
+```
+
+{{ template "helm-docs.versionFooter" . }}

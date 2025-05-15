@@ -1,0 +1,110 @@
+# -- Override the full name
+fullnameOverride: ""
+
+config:
+  # -- List of arguments to pass to the container
+  args: ["clearnode"]
+  # -- Log level (info, debug, warn, error)
+  logLevel: info
+  database:
+    # -- Database driver (sqlite, postgres)
+    driver: sqlite
+    # -- Database connection URL
+    url: file:main?mode=memory&cache=shared
+  # -- Additional environment variables as key-value pairs
+  extraEnvs: {}
+    # KEY: VALUE
+  # -- Name of secret containing environment variables
+  envSecret: ""
+
+# -- Number of replicas
+replicaCount: 1
+
+image:
+  # -- Docker image repository
+  repository: ghcr.io/erc7824/clearnode
+  # -- Docker image tag
+  tag: 0.0.1
+
+service:
+  http:
+    # -- Enable HTTP service
+    enabled: true
+    # -- HTTP service port
+    port: 8000
+    # -- HTTP service path
+    path: /
+
+metrics:
+  # -- Enable Prometheus metrics
+  enabled: true
+  # -- Metrics port
+  port: 4242
+  # -- Metrics endpoint path
+  endpoint: "/metrics"
+
+probes:
+  liveness:
+    # -- Enable liveness probe
+    enabled: false
+    # -- Liveness probe type (http, tcp)
+    type: tcp
+  readiness:
+    # -- Enable readiness probe
+    enabled: false
+    # -- Readiness probe type (http, tcp)
+    type: tcp
+
+resources:
+  # -- Resource limits
+  limits: {}
+    # cpu: 100m
+    # memory: 256Mi
+    # ephemeral-storage: 100Mi
+  # -- Resource requests
+  requests: {}
+    # cpu: 100m
+    # memory: 256Mi
+    # ephemeral-storage: 100Mi
+
+# -- Service account name
+serviceAccount: ""
+
+autoscaling:
+  # -- Enable autoscaling
+  enabled: false
+  # -- Minimum number of replicas
+  minReplicas: 2
+  # -- Maximum number of replicas
+  maxReplicas: 100
+  # -- Target CPU utilization
+  targetCPUUtilizationPercentage: 80
+  # -- Target memory utilization
+  targetMemoryUtilizationPercentage: 80
+
+gateway:
+  # -- Enable API gateway
+  enabled: true
+  # -- External hostname for the gateway
+  externalHostname: clearnode.example.com
+  # -- Gateway class name
+  className: envoy-gateway
+  # -- TLS cluster issuer
+  tlsClusterIssuer: zerossl-prod
+  # -- GKE static IP address name (GKE only)
+  ipAddressName: ""
+
+# -- Image pull secret name
+imagePullSecret: ""
+
+# -- Node selector
+nodeSelector: {}
+
+# -- Tolerations
+tolerations: []
+
+# -- Affinity settings
+affinity: {}
+
+# -- Additional labels to add to all resources
+extraLabels: {}

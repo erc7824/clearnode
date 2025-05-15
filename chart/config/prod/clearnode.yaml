@@ -1,0 +1,42 @@
+config:
+  logLevel: info
+  database:
+    driver: postgres
+    url: ""
+
+image:
+  repository: ghcr.io/erc7824/clearnode
+  tag: 0.0.1
+
+service:
+  http:
+    enabled: true
+    port: 8000
+    path: /
+
+metrics:
+  enabled: true
+  port: 4242
+  endpoint: "/metrics"
+
+resources:
+  limits:
+    cpu: 100m
+    memory: 256Mi
+    ephemeral-storage: 100Mi
+  requests:
+    cpu: 100m
+    memory: 256Mi
+    ephemeral-storage: 100Mi
+
+autoscaling:
+  enabled: false
+
+gateway:
+  enabled: true
+  externalHostname: clearnode.yellow.org
+  className: envoy-gateway
+  tlsClusterIssuer: zerossl-prod
+  ipAddressName: "" # TBS
+
+imagePullSecret: "" # TBS
