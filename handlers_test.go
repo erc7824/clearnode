@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"math/big"
 	"os"
 	"strings"
 	"testing"
@@ -333,7 +334,7 @@ func TestHandleListParticipants(t *testing.T) {
 
 	// Create RPC request with token address parameter
 	params := map[string]string{
-		"acc": "0xParticipant1",
+		"account_id": "0xParticipant1",
 	}
 	paramsJSON, err := json.Marshal(params)
 	require.NoError(t, err)
@@ -440,7 +441,7 @@ func TestHandleGetConfig(t *testing.T) {
 	assert.Equal(t, signer.GetAddress().Hex(), configMap.BrokerAddress)
 
 	// Verify supported networks
-	require.Len(t, configMap.SupportedNetworks, 3, "Should have 3 supported networks")
+	require.Len(t, configMap.Networks, 3, "Should have 3 supported networks")
 
 	// Map to check all networks are present
 	expectedNetworks := map[string]uint32{
@@ -449,7 +450,7 @@ func TestHandleGetConfig(t *testing.T) {
 		"base":    8453,
 	}
 
-	for _, network := range configMap.SupportedNetworks {
+	for _, network := range configMap.Networks {
 		expectedChainID, exists := expectedNetworks[network.Name]
 		assert.True(t, exists, "Network %s should be in expected networks", network.Name)
 		assert.Equal(t, expectedChainID, network.ChainID, "Chain ID should match for %s", network.Name)
@@ -595,7 +596,7 @@ func TestHandleGetChannels(t *testing.T) {
 		}
 
 		assert.Equal(t, originalChannel.Status, ch.Status, "Status should match")
-		assert.Equal(t, originalChannel.Amount, ch.Amount, "Amount should match")
+		assert.Equal(t, big.NewInt(int64(originalChannel.Amount)), ch.Amount, "Amount should match")
 		assert.Equal(t, originalChannel.Nonce, ch.Nonce, "Nonce should match")
 		assert.Equal(t, originalChannel.Version, ch.Version, "Version should match")
 		assert.Equal(t, originalChannel.Challenge, ch.Challenge, "Challenge should match")
