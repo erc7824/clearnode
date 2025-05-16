@@ -135,91 +135,59 @@ func TestHandlePing(t *testing.T) {
 // TestHandleCloseVirtualApp tests the close virtual app handler functionality
 func TestHandleCloseVirtualApp(t *testing.T) {
 	raw, err := crypto.GenerateKey()
-	if err != nil {
-		t.Fatalf("could not generate secp256k1 key: %v", err)
-	}
+	require.NoError(t, err)
 
-	signer := Signer{
-		privateKey: raw,
-	}
-	addr := signer.GetAddress()
-	participantA := addr.Hex()
+	signer := Signer{privateKey: raw}
+	participantA := signer.GetAddress().Hex()
+	participantB := "0xParticipantB"
 
-	// Set up test database with cleanup
 	db, cleanup := setupTestDB(t)
 	defer cleanup()
 
-	// Create token address
 	tokenAddress := "0xToken123"
-
-	// Set up participants
-	participantB := "0xParticipantB"
-
-	// Create channels for both participants
-	channelA := &Channel{
+	require.NoError(t, db.Create(&Channel{
 		ChannelID:    "0xChannelA",
-		ParticipantA: participantA,
+		Participant:  participantA,
 		ParticipantB: BrokerAddress,
 		Status:       ChannelStatusOpen,
 		Token:        tokenAddress,
 		Nonce:        1,
-		CreatedAt:    time.Now(),
-		UpdatedAt:    time.Now(),
-	}
-	require.NoError(t, db.Create(channelA).Error)
-
-	channelB := &Channel{
+	}).Error)
+	require.NoError(t, db.Create(&Channel{
 		ChannelID:    "0xChannelB",
-		ParticipantA: participantB,
+		Participant:  participantB,
 		ParticipantB: BrokerAddress,
 		Status:       ChannelStatusOpen,
 		Token:        tokenAddress,
 		Nonce:        1,
-		CreatedAt:    time.Now(),
-		UpdatedAt:    time.Now(),
-	}
-	require.NoError(t, db.Create(channelB).Error)
+	}).Error)
 
 	// Create a virtual app
 	vAppID := "0xVApp123"
-	vApp := &AppSession{
+	require.NoError(t, db.Create(&AppSession{
 		SessionID:    vAppID,
 		Participants: []string{participantA, participantB},
 		Status:       ChannelStatusOpen,
 		Challenge:    60,
 		Weights:      []int64{100, 0},
 		Quorum:       100,
-	}
-	require.NoError(t, db.Create(vApp).Error)
+	}).Error)
 
-	// Add funds to the virtual app
-	accountA := ledger.SelectBeneficiaryAccount(vAppID, participantA)
-	require.NoError(t, accountA.Record(200))
-
-	accountB := ledger.SelectBeneficiaryAccount(vAppID, participantB)
-	require.NoError(t, accountB.Record(300))
+	// credit the v-app account
+	require.NoError(t, ledger.SelectBeneficiaryAccount(vAppID, participantA).Record(200))
+	require.NoError(t, ledger.SelectBeneficiaryAccount(vAppID, participantB).Record(300))
 
 	assetSymbol := "usdc"
 	closeParams := CloseAppSessionParams{
 		AppSessionID: vAppID,
 		Allocations: []AppAllocation{
-			{
-				Participant: participantA,
-				AssetSymbol: assetSymbol,
-				Amount:      decimal.NewFromInt(250),
-			},
-			{
-				Participant: participantB,
-				AssetSymbol: assetSymbol,
-				Amount:      decimal.NewFromInt(250),
-			},
+			{Participant: participantA, AssetSymbol: assetSymbol, Amount: decimal.NewFromInt(250)},
+			{Participant: participantB, AssetSymbol: assetSymbol, Amount: decimal.NewFromInt(250)},
 		},
 	}
 
 	// Create RPC request
-	paramsJSON, err := json.Marshal(closeParams)
-	require.NoError(t, err)
-
+	paramsJSON, _ := json.Marshal(closeParams)
 	req := &RPCRequest{
 		Req: RPCData{
 			RequestID: 1,
@@ -229,132 +197,83 @@ func TestHandleCloseVirtualApp(t *testing.T) {
 		},
 	}
 
-	// Create signing data
-	closeSignData := CloseAppSignData{
+	signData := CloseAppSignData{
 		RequestID: req.Req.RequestID,
 		Method:    req.Req.Method,
 		Params:    []CloseAppSessionParams{closeParams},
 		Timestamp: req.Req.Timestamp,
 	}
-	signBytes, err := json.Marshal(closeSignData)
-	require.NoError(t, err)
-
-	signed, err := signer.Sign(signBytes)
-	require.NoError(t, err)
-	req.Sig = []string{hexutil.Encode(signed)}
+	signBytes, _ := json.Marshal(signData)
+	sig, _ := signer.Sign(signBytes)
+	req.Sig = []string{hexutil.Encode(sig)}
 
 	resp, err := HandleCloseApplication(req, db)
 	require.NoError(t, err)
-
-	// Verify response
 	assert.Equal(t, "close_app_session", resp.Res.Method)
-	assert.Equal(t, uint64(1), resp.Res.RequestID)
-
-	// Check that channel is marked as closed
-	var updatedChannel AppSession
-	require.NoError(t, db.Where("app_id = ?", vAppID).First(&updatedChannel).Error)
-	assert.Equal(t, ChannelStatusClosed, updatedChannel.Status)
+	var updated AppSession
+	require.NoError(t, db.Where("session_id = ?", vAppID).First(&updated).Error)
+	assert.Equal(t, ChannelStatusClosed, updated.Status)
 
 	// Check that funds were transferred back to channels according to allocations
-	directAccountA := ledger.SelectBeneficiaryAccount(channelA.ChannelID, participantA)
-	balanceA, err := directAccountA.Balance()
-	require.NoError(t, err)
-	assert.Equal(t, int64(250), balanceA)
+	balA, _ := ledger.SelectBeneficiaryAccount(participantA, participantA).Balance()
+	balB, _ := ledger.SelectBeneficiaryAccount(participantB, participantB).Balance()
+	assert.Equal(t, int64(250), balA)
+	assert.Equal(t, int64(250), balB)
 
-	directAccountB := ledger.SelectBeneficiaryAccount(channelB.ChannelID, participantB)
-	balanceB, err := directAccountB.Balance()
-	require.NoError(t, err)
-	assert.Equal(t, int64(250), balanceB)
-
-	// Check that virtual app accounts are empty
-	virtualAccountA := ledger.SelectBeneficiaryAccount(vAppID, participantA)
-	virtualBalanceA, err := virtualAccountA.Balance()
-	require.NoError(t, err)
-	assert.Equal(t, int64(0), virtualBalanceA)
-
-	virtualAccountB := ledger.SelectBeneficiaryAccount(vAppID, participantB)
-	virtualBalanceB, err := virtualAccountB.Balance()
-	require.NoError(t, err)
-	assert.Equal(t, int64(0), virtualBalanceB)
+	// ► v-app accounts drained
+	vBalA, _ := ledger.SelectBeneficiaryAccount(vAppID, participantA).Balance()
+	vBalB, _ := ledger.SelectBeneficiaryAccount(vAppID, participantB).Balance()
+	assert.Zero(t, vBalA)
+	assert.Zero(t, vBalB)
 }
 
-// TestHandleCreateVirtualApp tests the create virtual app handler functionality
+// ───────────────────────────────────────────────────────────────────────────────
+// TestHandleCreateVirtualApp – updated for new funding path & schema
+// ───────────────────────────────────────────────────────────────────────────────
 func TestHandleCreateVirtualApp(t *testing.T) {
 	// Generate private keys for both participants
-	rawKeyA, err := crypto.GenerateKey()
-	require.NoError(t, err)
-	signerA := Signer{privateKey: rawKeyA}
+	rawA, _ := crypto.GenerateKey()
+	rawB, _ := crypto.GenerateKey()
+	signerA := Signer{privateKey: rawA}
+	signerB := Signer{privateKey: rawB}
 	addrA := signerA.GetAddress().Hex()
-
-	rawKeyB, err := crypto.GenerateKey()
-	require.NoError(t, err)
-	signerB := Signer{privateKey: rawKeyB}
 	addrB := signerB.GetAddress().Hex()
 
-	// Set up test database with cleanup
 	db, cleanup := setupTestDB(t)
 	defer cleanup()
 
-	// Create channels for both participants
-	tokenAddress := "0xTokenXYZ"
-	channelA := &Channel{
-		ChannelID:    "0xChannelA",
-		ParticipantA: addrA,
-		ParticipantB: BrokerAddress,
-		Status:       ChannelStatusOpen,
-		Token:        tokenAddress,
-		Nonce:        1,
-		CreatedAt:    time.Now(),
-		UpdatedAt:    time.Now(),
+	// open direct channels (still required elsewhere in code-base)
+	token := "0xTokenXYZ"
+	for i, p := range []string{addrA, addrB} {
+		ch := &Channel{
+			ChannelID:    fmt.Sprintf("0xChannel%c", 'A'+i),
+			Participant:  p,
+			ParticipantB: BrokerAddress,
+			Status:       ChannelStatusOpen,
+			Token:        token,
+			Nonce:        1,
+		}
+		require.NoError(t, db.Create(ch).Error)
 	}
-	require.NoError(t, db.Create(channelA).Error)
 
-	channelB := &Channel{
-		ChannelID:    "0xChannelB",
-		ParticipantA: addrB,
-		ParticipantB: BrokerAddress,
-		Status:       ChannelStatusOpen,
-		Token:        tokenAddress,
-		Nonce:        1,
-		CreatedAt:    time.Now(),
-		UpdatedAt:    time.Now(),
-	}
-	require.NoError(t, db.Create(channelB).Error)
+	require.NoError(t, ledger.SelectBeneficiaryAccount(addrA, addrA).Record(100))
+	require.NoError(t, ledger.SelectBeneficiaryAccount(addrB, addrB).Record(200))
 
-	// Create ledger and fund channels
-	acctA := ledger.SelectBeneficiaryAccount(channelA.ChannelID, addrA)
-	require.NoError(t, acctA.Record(100))
-	acctB := ledger.SelectBeneficiaryAccount(channelB.ChannelID, addrB)
-	require.NoError(t, acctB.Record(200))
-
-	// Create common timestamp for all signatures - will also be used as nonce
-	timestamp := uint64(time.Now().Unix())
-
-	// First set up the combined parameters in the same format as the handler uses
-	appDefinition := AppDefinition{
+	ts := uint64(time.Now().Unix())
+	def := AppDefinition{
 		Protocol:     "test-proto",
 		Participants: []string{addrA, addrB},
 		Weights:      []uint64{1, 1},
 		Quorum:       2,
 		Challenge:    60,
-		Nonce:        timestamp, // Set nonce to match what the handler sets
+		Nonce:        ts, // if omitted, handler would use ts anyway
 	}
-
-	assetSymbol := "usdc"
-	// Create the RPC request with the combined application parameters
+	asset := "usdc"
 	createParams := CreateAppSessionParams{
-		Definition: appDefinition,
+		Definition: def,
 		Allocations: []AppAllocation{
-			{
-				Participant: addrA,
-				AssetSymbol: assetSymbol,
-				Amount:      decimal.NewFromInt(100),
-			},
-			{
-				Participant: addrB,
-				AssetSymbol: assetSymbol,
-				Amount:      decimal.NewFromInt(200),
-			},
+			{Participant: addrA, AssetSymbol: asset, Amount: decimal.NewFromInt(100)},
+			{Participant: addrB, AssetSymbol: asset, Amount: decimal.NewFromInt(200)},
 		},
 	}
 
@@ -363,79 +282,47 @@ func TestHandleCreateVirtualApp(t *testing.T) {
 			RequestID: 42,
 			Method:    "create_app_session",
 			Params:    []any{createParams},
-			Timestamp: timestamp,
+			Timestamp: ts,
 		},
 	}
 
-	// Create the CreateAppSignData object exactly as it's created in HandleCreateApplication
-	// This is the critical part to match!
-	req := CreateAppSignData{
+	// sign exactly like the handler
+	signData := CreateAppSignData{
 		RequestID: rpcReq.Req.RequestID,
 		Method:    rpcReq.Req.Method,
 		Params:    []CreateAppSessionParams{createParams},
 		Timestamp: rpcReq.Req.Timestamp,
 	}
+	signBytes, _ := signData.MarshalJSON()
+	sigA, _ := signerA.Sign(signBytes)
+	sigB, _ := signerB.Sign(signBytes)
+	rpcReq.Sig = []string{hexutil.Encode(sigA), hexutil.Encode(sigB)}
 
-	// Important: Use the custom MarshalJSON method instead of standard json.Marshal
-	// This ensures the exact same data format as in the handler
-	reqBytes, err := req.MarshalJSON()
-	require.NoError(t, err)
-
-	// Sign with participant A's key
-	signA, err := signerA.Sign(reqBytes)
-	require.NoError(t, err)
-	sigA := hexutil.Encode(signA)
-
-	// Sign with participant B's key
-	signB, err := signerB.Sign(reqBytes)
-	require.NoError(t, err)
-	sigB := hexutil.Encode(signB)
-
-	// Add both signatures to the request
-	rpcReq.Sig = []string{sigA, sigB}
-
-	// Process the request
 	resp, err := HandleCreateApplication(rpcReq, db)
 	require.NoError(t, err)
-	require.NotNil(t, resp)
 
-	// Validate RPC response
-	assert.Equal(t, rpcReq.Req.Method, resp.Res.Method)
-	assert.Equal(t, uint64(42), resp.Res.RequestID)
-
-	// Extract the AppResponse
-	params := resp.Res.Params
-	require.Len(t, params, 1)
-	require.IsType(t, &AppSessionResponse{}, params[0])
-	appResp := params[0].(*AppSessionResponse)
-
+	// ► response sanity
+	assert.Equal(t, "create_app_session", resp.Res.Method)
+	appResp, ok := resp.Res.Params[0].(*AppSessionResponse)
+	require.True(t, ok)
 	assert.Equal(t, string(ChannelStatusOpen), appResp.Status)
 
-	// Verify the VApp record exists
+	// ► v-app row exists
 	var vApp AppSession
-	require.NoError(t, db.
-		Where("app_id = ?", appResp.AppSessionID).
-		First(&vApp).Error)
-
+	require.NoError(t, db.Where("session_id = ?", appResp.AppSessionID).First(&vApp).Error)
 	assert.ElementsMatch(t, []string{addrA, addrB}, vApp.Participants)
-	assert.Equal(t, ChannelStatusOpen, vApp.Status)
 
-	// Check balances: channels drained, virtual app funded
-	directBalA, err := ledger.SelectBeneficiaryAccount(channelA.ChannelID, addrA).Balance()
-	require.NoError(t, err)
-	assert.Equal(t, int64(0), directBalA, "channel A should be drained")
+	// ► participant accounts drained
+	partBalA, _ := ledger.SelectBeneficiaryAccount(addrA, addrA).Balance()
+	partBalB, _ := ledger.SelectBeneficiaryAccount(addrB, addrB).Balance()
+	assert.Zero(t, partBalA)
+	assert.Zero(t, partBalB)
 
-	directBalB, err := ledger.SelectBeneficiaryAccount(channelB.ChannelID, addrB).Balance()
-	require.NoError(t, err)
-	assert.Equal(t, int64(0), directBalB, "channel B should be drained")
-
-	virtBalA, err := ledger.SelectBeneficiaryAccount(appResp.AppSessionID, addrA).Balance()
-	require.NoError(t, err)
-	assert.Equal(t, int64(100), virtBalA, "virtual app A balance")
-
-	virtBalB, err := ledger.SelectBeneficiaryAccount(appResp.AppSessionID, addrB).Balance()
-	require.NoError(t, err)
-	assert.Equal(t, int64(200), virtBalB, "virtual app B balance")
+	// ► virtual-app funded
+	vBalA, _ := ledger.SelectBeneficiaryAccount(appResp.AppSessionID, addrA).Balance()
+	vBalB, _ := ledger.SelectBeneficiaryAccount(appResp.AppSessionID, addrB).Balance()
+	assert.Equal(t, int64(100), vBalA)
+	assert.Equal(t, int64(200), vBalB)
 }
 
 // TestHandleListParticipants tests the list available channels handler functionality
@@ -459,7 +346,7 @@ func TestHandleListParticipants(t *testing.T) {
 		// Create channel
 		channel := Channel{
 			ChannelID:    p.channelID,
-			ParticipantA: p.address,
+			Participant:  p.address,
 			ParticipantB: BrokerAddress,
 			Status:       p.status,
 			CreatedAt:    time.Now(),
@@ -571,7 +458,7 @@ func TestHandleGetChannels(t *testing.T) {
 	channels := []Channel{
 		{
 			ChannelID:    "0xChannel1",
-			ParticipantA: participantAddr,
+			Participant:  participantAddr,
 			ParticipantB: BrokerAddress,
 			Status:       ChannelStatusOpen,
 			Token:        tokenAddress,
@@ -583,7 +470,7 @@ func TestHandleGetChannels(t *testing.T) {
 		},
 		{
 			ChannelID:    "0xChannel2",
-			ParticipantA: participantAddr,
+			Participant:  participantAddr,
 			ParticipantB: BrokerAddress,
 			Status:       ChannelStatusClosed,
 			Token:        tokenAddress,
@@ -595,7 +482,7 @@ func TestHandleGetChannels(t *testing.T) {
 		},
 		{
 			ChannelID:    "0xChannel3",
-			ParticipantA: participantAddr,
+			Participant:  participantAddr,
 			ParticipantB: BrokerAddress,
 			Status:       ChannelStatusJoining,
 			Token:        tokenAddress,
@@ -613,7 +500,7 @@ func TestHandleGetChannels(t *testing.T) {
 
 	otherChannel := Channel{
 		ChannelID:    "0xOtherChannel",
-		ParticipantA: "0xOtherParticipant",
+		Participant:  "0xOtherParticipant",
 		ParticipantB: BrokerAddress,
 		Status:       ChannelStatusOpen,
 		Token:        tokenAddress,

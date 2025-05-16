@@ -218,8 +218,8 @@ func (c *Custody) handleBlockChainEvent(l types.Log) {
 			assetDecimals := asset.Decimals
 			tokenAmount := decimal.NewFromBigInt(big.NewInt(int64(channel.Amount)), -int32(assetDecimals))
 
-			ledger := GetParticipantLedger(tx, channel.ParticipantA)
-			if err := ledger.Record(channel.ParticipantA, asset.Symbol, tokenAmount); err != nil {
+			ledger := GetParticipantLedger(tx, channel.Participant)
+			if err := ledger.Record(channel.Participant, asset.Symbol, tokenAmount); err != nil {
 				log.Printf("[Closed] Error recording balance update for participant A: %v", err)
 				return err
 			}
@@ -272,8 +272,8 @@ func (c *Custody) handleBlockChainEvent(l types.Log) {
 			assetDecimals := asset.Decimals
 			tokenAmount := decimal.NewFromBigInt(big.NewInt(int64(channel.Amount)), -int32(assetDecimals))
 
-			ledger := GetParticipantLedger(tx, channel.ParticipantA)
-			if err := ledger.Record(channel.ParticipantA, asset.Symbol, tokenAmount.Neg()); err != nil {
+			ledger := GetParticipantLedger(tx, channel.Participant)
+			if err := ledger.Record(channel.Participant, asset.Symbol, tokenAmount.Neg()); err != nil {
 				log.Printf("[Closed] Error recording balance update for participant A: %v", err)
 				return err
 			}

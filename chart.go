@@ -1,5 +1,15 @@
 package main
 
+// The mnemonic DEADCLIC is used to help remember the effect of debit or credit transactions on the relevant accounts.
+// DEAD: Debit to increase Expense, Asset and Drawing accounts and CLIC: Credit to increase Liability, Income and Capital accounts.
+
+//                Debit	Credit
+// Asset	    Increase	Decrease
+// Liability	Decrease	Increase
+// Capital	    Decrease	Increase
+// Revenue	    Decrease	Increase
+// Expense	    Increase	Decrease
+
 // AccountType represents the type of account in the ledger system
 type AccountType uint16
 
