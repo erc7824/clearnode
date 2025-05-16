@@ -33,7 +33,7 @@ func setupTestSqlite(t testing.TB) *gorm.DB {
 	require.NoError(t, err)
 
 	// Auto migrate all required models
-	err = db.AutoMigrate(&Entry{}, &Channel{}, &VApp{}, &RPCRecord{})
+	err = db.AutoMigrate(&Entry{}, &Channel{}, &AppSession{}, &RPCRecord{})
 	require.NoError(t, err)
 
 	return db
@@ -74,7 +74,7 @@ func setupTestPostgres(ctx context.Context, t testing.TB) (*gorm.DB, testcontain
 	require.NoError(t, err)
 
 	// Auto migrate all required models
-	err = db.AutoMigrate(&Entry{}, &Channel{}, &VApp{}, &RPCRecord{})
+	err = db.AutoMigrate(&Entry{}, &Channel{}, &AppSession{}, &RPCRecord{})
 	require.NoError(t, err)
 
 	return db, postgresContainer
@@ -184,7 +184,7 @@ func TestHandleCloseVirtualApp(t *testing.T) {
 
 	// Create a virtual app
 	vAppID := "0xVApp123"
-	vApp := &VApp{
+	vApp := &AppSession{
 		AppID:        vAppID,
 		Participants: []string{participantA, participantB},
 		Status:       ChannelStatusOpen,
@@ -204,9 +204,9 @@ func TestHandleCloseVirtualApp(t *testing.T) {
 	accountB := ledger.SelectBeneficiaryAccount(vAppID, participantB)
 	require.NoError(t, accountB.Record(300))
 
-	closeParams := CloseApplicationParams{
-		AppID:            vAppID,
-		FinalAllocations: []int64{250, 250},
+	closeParams := CloseAppSessionParams{
+		AppSessionID: vAppID,
+		Allocations:  []int64{250, 250},
 	}
 
 	// Create RPC request
@@ -226,7 +226,7 @@ func TestHandleCloseVirtualApp(t *testing.T) {
 	closeSignData := CloseAppSignData{
 		RequestID: req.Req.RequestID,
 		Method:    req.Req.Method,
-		Params:    []CloseApplicationParams{closeParams},
+		Params:    []CloseAppSessionParams{closeParams},
 		Timestamp: req.Req.Timestamp,
 	}
 	signBytes, err := json.Marshal(closeSignData)
@@ -244,7 +244,7 @@ func TestHandleCloseVirtualApp(t *testing.T) {
 	assert.Equal(t, uint64(1), resp.Res.RequestID)
 
 	// Check that channel is marked as closed
-	var updatedChannel VApp
+	var updatedChannel AppSession
 	require.NoError(t, db.Where("app_id = ?", vAppID).First(&updatedChannel).Error)
 	assert.Equal(t, ChannelStatusClosed, updatedChannel.Status)
 
@@ -335,7 +335,7 @@ func TestHandleCreateVirtualApp(t *testing.T) {
 	}
 
 	// Create the RPC request with the combined application parameters
-	createParams := CreateApplicationParams{
+	createParams := CreateAppSessionParams{
 		Definition:  appDefinition,
 		Token:       tokenAddress,
 		Allocations: []int64{100, 200}, // Combined allocations
@@ -356,7 +356,7 @@ func TestHandleCreateVirtualApp(t *testing.T) {
 	req := CreateAppSignData{
 		RequestID: rpcReq.Req.RequestID,
 		Method:    rpcReq.Req.Method,
-		Params:    []CreateApplicationParams{createParams},
+		Params:    []CreateAppSessionParams{createParams},
 		Timestamp: rpcReq.Req.Timestamp,
 	}
 
@@ -390,15 +390,15 @@ func TestHandleCreateVirtualApp(t *testing.T) {
 	// Extract the AppResponse
 	params := resp.Res.Params
 	require.Len(t, params, 1)
-	require.IsType(t, &AppResponse{}, params[0])
-	appResp := params[0].(*AppResponse)
+	require.IsType(t, &AppSessionResponse{}, params[0])
+	appResp := params[0].(*AppSessionResponse)
 
 	assert.Equal(t, string(ChannelStatusOpen), appResp.Status)
 
 	// Verify the VApp record exists
-	var vApp VApp
+	var vApp AppSession
 	require.NoError(t, db.
-		Where("app_id = ?", appResp.AppID).
+		Where("app_id = ?", appResp.AppSessionID).
 		First(&vApp).Error)
 	assert.Equal(t, tokenAddress, vApp.Token)
 	assert.ElementsMatch(t, []string{addrA, addrB}, vApp.Participants)
@@ -413,11 +413,11 @@ func TestHandleCreateVirtualApp(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, int64(0), directBalB, "channel B should be drained")
 
-	virtBalA, err := ledger.SelectBeneficiaryAccount(appResp.AppID, addrA).Balance()
+	virtBalA, err := ledger.SelectBeneficiaryAccount(appResp.AppSessionID, addrA).Balance()
 	require.NoError(t, err)
 	assert.Equal(t, int64(100), virtBalA, "virtual app A balance")
 
-	virtBalB, err := ledger.SelectBeneficiaryAccount(appResp.AppID, addrB).Balance()
+	virtBalB, err := ledger.SelectBeneficiaryAccount(appResp.AppSessionID, addrB).Balance()
 	require.NoError(t, err)
 	assert.Equal(t, int64(200), virtBalB, "virtual app B balance")
 }
@@ -491,7 +491,7 @@ func TestHandleListParticipants(t *testing.T) {
 	require.NotEmpty(t, responseParams)
 
 	// First parameter should be an array of ChannelAvailabilityResponse
-	channelsArray, ok := responseParams[0].([]AvailableBalance)
+	channelsArray, ok := responseParams[0].([]Balance)
 	require.True(t, ok, "Response should contain an array of ChannelAvailabilityResponse")
 
 	// We should have 4 channels with positive balances (excluding closed one)
@@ -503,12 +503,12 @@ func TestHandleListParticipants(t *testing.T) {
 	}
 
 	for _, ch := range channelsArray {
-		expectedBalance, exists := expectedAddresses[ch.Address]
-		assert.True(t, exists, "Unexpected address in response: %s", ch.Address)
-		assert.Equal(t, expectedBalance, ch.Amount, "Incorrect balance for address %s", ch.Address)
+		expectedBalance, exists := expectedAddresses[ch.Asset]
+		assert.True(t, exists, "Unexpected address in response: %s", ch.Asset)
+		assert.Equal(t, expectedBalance, ch.Amount, "Incorrect balance for address %s", ch.Asset)
 
 		// Remove from map to ensure each address appears only once
-		delete(expectedAddresses, ch.Address)
+		delete(expectedAddresses, ch.Asset)
 	}
 
 	assert.Empty(t, expectedAddresses, "Not all expected addresses were found in the response")

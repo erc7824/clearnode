@@ -335,7 +335,7 @@ func forwardMessage(appID string, rpcData RPCData, signatures []string, msg []by
 
 	var participants []string
 	err = h.ledger.db.Transaction(func(tx *gorm.DB) error {
-		var vApp VApp
+		var vApp AppSession
 		if err := tx.Where("app_id = ?", appID).First(&vApp).Error; err != nil {
 			return errors.New("failed to find virtual app: " + err.Error())
 		}
@@ -374,14 +374,14 @@ func forwardMessage(appID string, rpcData RPCData, signatures []string, msg []by
 				return errors.New("Invalid intent: sum of all intents must be 0")
 			}
 
-			participantsBalances, err := GetAccountBalances(tx, appID)
+			participantsBalances, err := GetBalances(tx, appID)
 			if err != nil {
 				return errors.New("Failed to get participant balance: " + err.Error())
 			}
 
 			for i, participantBalance := range participantsBalances {
 				if participantBalance.Amount+intent[i] < 0 {
-					return errors.New("Invalid intent: insufficient balance for participant " + participantBalance.Address)
+					return errors.New("Invalid intent: insufficient balance for participant " + participantBalance.Asset)
 				}
 			}
 

@@ -243,12 +243,8 @@ func HandleCreateApplication(rpc *RPCRequest, ledger *Ledger) (*RPCResponse, err
 	}
 
 	// Generate a unique ID for the virtual application
-	vAppID := nitrolite.GetChannelID(nitrolite.Channel{
-		Participants: participantsAddresses,
-		Adjudicator:  common.HexToAddress("0x0000000000000000000000000000000000000000"),
-		Challenge:    createApp.Definition.Challenge,
-		Nonce:        createApp.Definition.Nonce,
-	})
+	b, _ := json.Marshal(createApp.Definition)
+	vAppID := crypto.Keccak256Hash(b)
 
 	req := CreateAppSignData{
 		RequestID: rpc.Req.RequestID,
