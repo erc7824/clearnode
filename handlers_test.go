@@ -148,9 +148,6 @@ func TestHandleCloseVirtualApp(t *testing.T) {
 	db, cleanup := setupTestDB(t)
 	defer cleanup()
 
-	// Create ledger
-	ledger := NewLedger(db)
-
 	// Create token address
 	tokenAddress := "0xToken123"
 
@@ -185,14 +182,11 @@ func TestHandleCloseVirtualApp(t *testing.T) {
 	// Create a virtual app
 	vAppID := "0xVApp123"
 	vApp := &AppSession{
-		AppID:        vAppID,
+		SessionID:    vAppID,
 		Participants: []string{participantA, participantB},
 		Status:       ChannelStatusOpen,
 		Challenge:    60,
 		Weights:      []int64{100, 0},
-		Token:        tokenAddress,
-		CreatedAt:    time.Now(),
-		UpdatedAt:    time.Now(),
 		Quorum:       100,
 	}
 	require.NoError(t, db.Create(vApp).Error)
@@ -236,7 +230,7 @@ func TestHandleCloseVirtualApp(t *testing.T) {
 	require.NoError(t, err)
 	req.Sig = []string{hexutil.Encode(signed)}
 
-	resp, err := HandleCloseApplication(req, ledger)
+	resp, err := HandleCloseApplication(req, db)
 	require.NoError(t, err)
 
 	// Verify response
@@ -315,7 +309,6 @@ func TestHandleCreateVirtualApp(t *testing.T) {
 	require.NoError(t, db.Create(channelB).Error)
 
 	// Create ledger and fund channels
-	ledger := NewLedger(db)
 	acctA := ledger.SelectBeneficiaryAccount(channelA.ChannelID, addrA)
 	require.NoError(t, acctA.Record(100))
 	acctB := ledger.SelectBeneficiaryAccount(channelB.ChannelID, addrB)
@@ -337,7 +330,6 @@ func TestHandleCreateVirtualApp(t *testing.T) {
 	// Create the RPC request with the combined application parameters
 	createParams := CreateAppSessionParams{
 		Definition:  appDefinition,
-		Token:       tokenAddress,
 		Allocations: []int64{100, 200}, // Combined allocations
 	}
 
@@ -348,7 +340,6 @@ func TestHandleCreateVirtualApp(t *testing.T) {
 			Params:    []any{createParams},
 			Timestamp: timestamp,
 		},
-		Intent: []int64{100, 200},
 	}
 
 	// Create the CreateAppSignData object exactly as it's created in HandleCreateApplication
@@ -379,7 +370,7 @@ func TestHandleCreateVirtualApp(t *testing.T) {
 	rpcReq.Sig = []string{sigA, sigB}
 
 	// Process the request
-	resp, err := HandleCreateApplication(rpcReq, ledger)
+	resp, err := HandleCreateApplication(rpcReq, db)
 	require.NoError(t, err)
 	require.NotNil(t, resp)
 
@@ -400,7 +391,7 @@ func TestHandleCreateVirtualApp(t *testing.T) {
 	require.NoError(t, db.
 		Where("app_id = ?", appResp.AppSessionID).
 		First(&vApp).Error)
-	assert.Equal(t, tokenAddress, vApp.Token)
+
 	assert.ElementsMatch(t, []string{addrA, addrB}, vApp.Participants)
 	assert.Equal(t, ChannelStatusOpen, vApp.Status)
 
@@ -427,9 +418,6 @@ func TestHandleListParticipants(t *testing.T) {
 	// Set up test database with cleanup
 	db, cleanup := setupTestDB(t)
 	defer cleanup()
-
-	// Create channel service and ledger
-	ledger := NewLedger(db)
 
 	// Create test channels with the broker
 	participants := []struct {
@@ -552,10 +540,8 @@ func TestHandleGetChannels(t *testing.T) {
 	db, cleanup := setupTestDB(t)
 	defer cleanup()
 
-	ledger := NewLedger(db)
-
 	tokenAddress := "0xToken123"
-	networkID := "137"
+	chainID := uint32(137)
 
 	channels := []Channel{
 		{
@@ -564,7 +550,7 @@ func TestHandleGetChannels(t *testing.T) {
 			ParticipantB: BrokerAddress,
 			Status:       ChannelStatusOpen,
 			Token:        tokenAddress,
-			NetworkID:    networkID,
+			ChainID:      chainID,
 			Amount:       1000,
 			Nonce:        1,
 			CreatedAt:    time.Now().Add(-24 * time.Hour), // 1 day ago
@@ -576,7 +562,7 @@ func TestHandleGetChannels(t *testing.T) {
 			ParticipantB: BrokerAddress,
 			Status:       ChannelStatusClosed,
 			Token:        tokenAddress,
-			NetworkID:    networkID,
+			ChainID:      chainID,
 			Amount:       2000,
 			Nonce:        2,
 			CreatedAt:    time.Now().Add(-12 * time.Hour), // 12 hours ago
@@ -588,7 +574,7 @@ func TestHandleGetChannels(t *testing.T) {
 			ParticipantB: BrokerAddress,
 			Status:       ChannelStatusJoining,
 			Token:        tokenAddress,
-			NetworkID:    networkID,
+			ChainID:      chainID,
 			Amount:       3000,
 			Nonce:        3,
 			CreatedAt:    time.Now().Add(-6 * time.Hour), // 6 hours ago
@@ -606,7 +592,7 @@ func TestHandleGetChannels(t *testing.T) {
 		ParticipantB: BrokerAddress,
 		Status:       ChannelStatusOpen,
 		Token:        tokenAddress,
-		NetworkID:    networkID,
+		ChainID:      chainID,
 		Amount:       5000,
 		Nonce:        4,
 		CreatedAt:    time.Now(),
@@ -635,7 +621,7 @@ func TestHandleGetChannels(t *testing.T) {
 	require.NoError(t, err)
 	rpcRequest.Sig = []string{hexutil.Encode(signed)}
 
-	response, err := HandleGetChannels(rpcRequest, ledger)
+	response, err := HandleGetChannels(rpcRequest, db)
 	require.NoError(t, err)
 	require.NotNil(t, response)
 
@@ -658,7 +644,7 @@ func TestHandleGetChannels(t *testing.T) {
 	for _, ch := range channelsSlice {
 		assert.Equal(t, participantAddr, ch.Participant, "ParticipantA should match")
 		assert.Equal(t, tokenAddress, ch.Token, "Token should match")
-		assert.Equal(t, networkID, ch.NetworkID, "NetworkID should match")
+		assert.Equal(t, chainID, ch.NetworkID, "NetworkID should match")
 
 		// Find the corresponding original channel to compare with
 		var originalChannel Channel
@@ -686,7 +672,7 @@ func TestHandleGetChannels(t *testing.T) {
 		Sig: []string{"0xInvalidSignature"},
 	}
 
-	_, err = HandleGetChannels(invalidReq, ledger)
+	_, err = HandleGetChannels(invalidReq, db)
 	assert.Error(t, err, "Should return error with invalid signature")
 	assert.Contains(t, err.Error(), "invalid signature", "Error should mention invalid signature")
 
@@ -701,7 +687,7 @@ func TestHandleGetChannels(t *testing.T) {
 		Sig: []string{hexutil.Encode(signed)},
 	}
 
-	_, err = HandleGetChannels(missingParamReq, ledger)
+	_, err = HandleGetChannels(missingParamReq, db)
 	assert.Error(t, err, "Should return error with missing participant")
 	assert.Contains(t, err.Error(), "missing participant", "Error should mention missing participant")
 }
