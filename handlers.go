@@ -271,39 +271,29 @@ func HandleCreateApplication(rpc *RPCRequest, db *gorm.DB) (*RPCResponse, error)
 
 	// Use a transaction to ensure atomicity for the entire operation
 	err = db.Transaction(func(tx *gorm.DB) error {
-		for i, participant := range createApp.Definition.Participants {
-			participantChannel, err := getChannelForParticipant(tx, participant)
-			if err != nil {
-				return err
-			}
-
-			allocation := big.NewInt(createApp.Allocations[i])
-
-			if allocation.Sign() < 0 {
+		for _, allocation := range createApp.Allocations {
+			if allocation.Amount.IsNegative() {
 				return errors.New("invalid allocation")
 			}
-
-			if allocation.Sign() > 0 {
-				if !recoveredAddresses[participant] {
-					return fmt.Errorf("missing signature for participant %s", participant)
+			if allocation.Amount.IsPositive() {
+				if !recoveredAddresses[allocation.Participant] {
+					return fmt.Errorf("missing signature for participant %s", allocation.Participant)
 				}
 			}
 
-			participantLedger := GetParticipantLedger(tx, participant)
-			//participantLedger.Balance()
-
-			account := ledgerTx.SelectBeneficiaryAccount(participantChannel.ChannelID, participant)
-			balance, err := account.Balance()
+			participantLedger := GetParticipantLedger(tx, allocation.Participant)
+			balance, err := participantLedger.Balance(allocation.Participant, allocation.AssetSymbol)
 			if err != nil {
 				return fmt.Errorf("failed to check participant balance: %w", err)
 			}
-			if balance < allocation.Int64() {
+			if allocation.Amount.GreaterThan(balance) {
 				return errors.New("insufficient funds")
 			}
-
-			toAccount := ledgerTx.SelectBeneficiaryAccount(appSessionID.Hex(), participant)
-			if err := account.Transfer(toAccount, allocation.Int64()); err != nil {
+			if err := participantLedger.Record(allocation.Participant, allocation.AssetSymbol, allocation.Amount.Neg()); err != nil {
 				return fmt.Errorf("failed to transfer funds from participant: %w", err)
+			}
+			if err := participantLedger.Record(appSessionID.Hex(), allocation.AssetSymbol, allocation.Amount); err != nil {
+				return fmt.Errorf("failed to transfer funds to virtual app: %w", err)
 			}
 		}
 
@@ -345,9 +335,9 @@ func HandleCreateApplication(rpc *RPCRequest, db *gorm.DB) (*RPCResponse, error)
 	return rpcResponse, nil
 }
 
-// HandleCloseApplication closes a virtual app and redistributes funds to participants
+// HandleCloseApplication closes a virtual app session and redistributes funds to participants
 func HandleCloseApplication(rpc *RPCRequest, db *gorm.DB) (*RPCResponse, error) {
-	if len(rpc.Req.Params) < 1 {
+	if len(rpc.Req.Params) == 0 {
 		return nil, errors.New("missing parameters")
 	}
 
@@ -365,6 +355,14 @@ func HandleCloseApplication(rpc *RPCRequest, db *gorm.DB) (*RPCResponse, error) 
 		return nil, errors.New("missing required parameters: app_id or allocations")
 	}
 
+	assets := map[string]struct{}{}
+	for _, a := range params.Allocations {
+		if a.Participant == "" || a.AssetSymbol == "" || a.Amount.IsNegative() {
+			return nil, errors.New("invalid allocation row")
+		}
+		assets[a.AssetSymbol] = struct{}{}
+	}
+
 	req := CloseAppSignData{
 		RequestID: rpc.Req.RequestID,
 		Method:    rpc.Req.Method,
@@ -378,74 +376,105 @@ func HandleCloseApplication(rpc *RPCRequest, db *gorm.DB) (*RPCResponse, error) 
 	}
 
 	err = db.Transaction(func(tx *gorm.DB) error {
-		ledgerTx := &ParticipantLedger{db: tx}
-
-		// Fetch and validate the virtual app
 		var appSession AppSession
 		if err := tx.Where("session_id = ? AND status = ?", params.AppSessionID, ChannelStatusOpen).Order("nonce DESC").
 			First(&appSession).Error; err != nil {
 			return fmt.Errorf("virtual app not found or not open: %w", err)
 		}
 
-		participantWeights := make(map[string]int64, len(appSession.Participants))
+		participantWeights := map[string]int64{}
 		for i, addr := range appSession.Participants {
 			participantWeights[strings.ToLower(addr)] = appSession.Weights[i]
 		}
 
+		seen := map[string]bool{}
 		var totalWeight int64
 		for _, sigHex := range rpc.Sig {
 			recovered, err := RecoverAddress(reqBytes, sigHex)
 			if err != nil {
 				return err
 			}
-			if w, ok := participantWeights[strings.ToLower(recovered)]; ok && w > 0 {
-				totalWeight += w
+			recovered = strings.ToLower(recovered)
+			if seen[recovered] {
+				return errors.New("duplicate signature")
 			}
+			seen[recovered] = true
+			weight, ok := participantWeights[recovered]
+			if !ok {
+				return fmt.Errorf("signature from unknown participant %s", recovered)
+			}
+			if weight <= 0 {
+				return fmt.Errorf("zero weight for signer %s", recovered)
+			}
+			totalWeight += weight
 		}
-
 		if totalWeight < int64(appSession.Quorum) {
-			return fmt.Errorf("quorum not met: %d/%d", totalWeight, appSession.Quorum)
+			return fmt.Errorf("quorum not met: %d / %d", totalWeight, appSession.Quorum)
 		}
 
-		fmt.Println("Quorum met:", totalWeight, "of", appSession.Quorum)
+		sessionBal := map[string]decimal.Decimal{}
 
-		// Process allocations
-		totalVirtualAppBalance, sumAllocations := int64(0), int64(0)
-		for i, participant := range appSession.Participants {
-			allocation := params.FinalAllocations[i]
-			if allocation < 0 {
-				return errors.New("invalid allocation")
+		for _, p := range appSession.Participants {
+			ledger := GetParticipantLedger(tx, p)
+			for asset := range assets {
+				bal, err := ledger.Balance(appSession.SessionID, asset)
+				if err != nil {
+					return fmt.Errorf("failed to read balance for %s:%s: %w", p, asset, err)
+				}
+				sessionBal[asset] = sessionBal[asset].Add(bal)
 			}
+		}
 
-			// Adjust balances
-			virtualBalance := ledgerTx.SelectBeneficiaryAccount(appSession.AppID, participant)
-			participantBalance, err := virtualBalance.Balance()
+		allocationSum := map[string]decimal.Decimal{}
+		participantsSeen := map[string]bool{}
+
+		for _, alloc := range params.Allocations {
+			addr := strings.ToLower(alloc.Participant)
+			if _, ok := participantWeights[addr]; !ok {
+				return fmt.Errorf("allocation to non-participant %s", alloc.Participant)
+			}
+			if participantsSeen[addr] {
+				return fmt.Errorf("participant %s appears more than once", alloc.Participant)
+			}
+			participantsSeen[addr] = true
+
+			ledger := GetParticipantLedger(tx, alloc.Participant)
+			balance, err := ledger.Balance(appSession.SessionID, alloc.AssetSymbol)
 			if err != nil {
-				return fmt.Errorf("failed to check balance for %s: %w", participant, err)
+				return fmt.Errorf("failed to get participant balance: %w", err)
 			}
-			totalVirtualAppBalance += participantBalance
-
-			if err := virtualBalance.Record(-participantBalance); err != nil {
-				return fmt.Errorf("failed to adjust virtual balance for %s: %w", participant, err)
-			}
-
-			channel, err := getChannelForParticipant(tx, participant)
-			if err != nil {
-				return fmt.Errorf("failed to find channel for %s: %w", participant, err)
+			if !balance.Equal(alloc.Amount) {
+				return fmt.Errorf("allocation mismatch for %s in %s: expected %s, got %s",
+					alloc.Participant, alloc.AssetSymbol, balance, alloc.Amount)
 			}
 
-			toAccount := ledgerTx.SelectBeneficiaryAccount(channel.ChannelID, participant)
-			if err := toAccount.Record(allocation); err != nil {
-				return fmt.Errorf("failed to adjust balance for %s: %w", participant, err)
+			// Debit session, credit participant
+			if err := ledger.Record(appSession.SessionID, alloc.AssetSymbol, balance.Neg()); err != nil {
+				return fmt.Errorf("failed to debit session: %w", err)
 			}
-			sumAllocations += allocation
+			if err := ledger.Record(alloc.Participant, alloc.AssetSymbol, alloc.Amount); err != nil {
+				return fmt.Errorf("failed to credit participant: %w", err)
+			}
+
+			allocationSum[alloc.AssetSymbol] = allocationSum[alloc.AssetSymbol].Add(alloc.Amount)
 		}
 
-		if sumAllocations != totalVirtualAppBalance {
-			return errors.New("allocation mismatch with virtual app balance")
+		// Every participant must appear exactly once
+		if len(participantsSeen) != len(appSession.Participants) {
+			return errors.New("allocations must be provided for every participant exactly once")
 		}
 
-		// Close the virtual app
+		for asset, bal := range sessionBal {
+			if alloc, ok := allocationSum[asset]; !ok || !bal.Equal(alloc) {
+				return fmt.Errorf("asset %s not fully redistributed", asset)
+			}
+		}
+		for asset := range allocationSum {
+			if _, ok := sessionBal[asset]; !ok {
+				return fmt.Errorf("allocation references unknown asset %s", asset)
+			}
+		}
+
 		return tx.Model(&appSession).Updates(map[string]any{
 			"status":     ChannelStatusClosed,
 			"updated_at": time.Now(),

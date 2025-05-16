@@ -333,85 +333,13 @@ func forwardMessage(appID string, rpcData RPCData, signatures []string, msg []by
 		return errors.New("unauthorized: invalid signature or sender is not a participant of this vApp")
 	}
 
-	var participants []string
-	err = h.db.Transaction(func(tx *gorm.DB) error {
-		var vApp AppSession
-		if err := tx.Where("app_id = ?", appID).First(&vApp).Error; err != nil {
-			return errors.New("failed to find virtual app: " + err.Error())
-		}
-		participants = vApp.Participants
-
-		// TODO: we currently skip intent as in current rpc it is not securely signed.
-		intent := []int64{}
-		// Update ledger with the new intent if present
-		if len(intent) != 0 {
-			participantWeights := make(map[string]int64, len(vApp.Participants))
-			for i, addr := range vApp.Participants {
-				participantWeights[strings.ToLower(addr)] = vApp.Weights[i]
-			}
-
-			var totalWeight int64
-			for addr := range recoveredAddresses {
-				if w, ok := participantWeights[strings.ToLower(addr)]; ok && w > 0 {
-					totalWeight += w
-				}
-			}
-
-			// Update only if the quorum is met
-			if totalWeight < int64(vApp.Quorum) {
-				return fmt.Errorf("quorum to apply intent is not met: %d/%d", totalWeight, vApp.Quorum)
-			}
-
-			if len(participants) != len(intent) {
-				return errors.New("Invalid intent length")
-			}
-
-			var totalIntent int64 = 0
-			for _, value := range intent {
-				totalIntent += value
-			}
-			if totalIntent != 0 {
-				return errors.New("Invalid intent: sum of all intents must be 0")
-			}
-
-			// participantsBalances, err := GetBalances(tx, appID)
-			// if err != nil {
-			// 	return errors.New("Failed to get participant balance: " + err.Error())
-			// }
-
-			// for i, participantBalance := range participantsBalances {
-			// 	if participantBalance.Amount+intent[i] < 0 {
-			// 		return errors.New("Invalid intent: insufficient balance for participant " + participantBalance.Asset)
-			// 	}
-			// }
-
-			// // Iterate over participants to keep same order with intent
-			// for i, participant := range participants {
-			// 	account := h.ledger.SelectBeneficiaryAccount(appID, participant)
-			// 	if err := account.Record(intent[i]); err != nil {
-			// 		return errors.New("Failed to record intent: " + err.Error())
-			// 	}
-			// }
-
-			// Update the virtual app version in the database
-			if rpcData.Timestamp <= vApp.Version {
-				return errors.New("outdated request")
-			}
-
-			vApp.Version = rpcData.Timestamp
-			if err := tx.Save(&vApp).Error; err != nil {
-				return errors.New("failed to update vapp version: " + err.Error())
-			}
-		}
-		return nil
-	})
-
-	if err != nil {
-		return err
+	var vApp AppSession
+	if err := h.db.Where("app_id = ?", appID).First(&vApp).Error; err != nil {
+		return errors.New("failed to find virtual app: " + err.Error())
 	}
 
 	// Iterate over all recipients in a virtual app and send the message
-	for _, recipient := range participants {
+	for _, recipient := range vApp.Participants {
 		if recipient == fromAddress {
 			continue
 		}
