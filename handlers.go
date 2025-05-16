@@ -514,24 +514,24 @@ func HandleCloseApplication(rpc *RPCRequest, db *gorm.DB) (*RPCResponse, error) 
 
 // HandleGetAppDefinition returns the application definition for a ledger account
 func HandleGetAppDefinition(rpc *RPCRequest, db *gorm.DB) (*RPCResponse, error) {
-	var accountID string
+	var sessionID string
 
 	if len(rpc.Req.Params) > 0 {
 		paramsJSON, err := json.Marshal(rpc.Req.Params[0])
 		if err == nil {
 			var params map[string]string
 			if err := json.Unmarshal(paramsJSON, &params); err == nil {
-				accountID = params["acc"]
+				sessionID = params["id"]
 			}
 		}
 	}
 
-	if accountID == "" {
+	if sessionID == "" {
 		return nil, errors.New("missing account ID")
 	}
 
 	var vApp AppSession
-	if err := db.Where("session_id = ?", accountID).First(&vApp).Error; err != nil {
+	if err := db.Where("session_id = ?", sessionID).First(&vApp).Error; err != nil {
 		return nil, fmt.Errorf("failed to find application: %w", err)
 	}
 
