@@ -571,7 +571,7 @@ func HandleResizeChannel(rpc *RPCRequest, db *gorm.DB, signer *Signer) (*RPCResp
 		return nil, errors.New("error serializing message")
 	}
 
-	isValid, err := ValidateSignature(reqBytes, rpc.Sig[0], channel.ParticipantA)
+	isValid, err := ValidateSignature(reqBytes, rpc.Sig[0], channel.Participant)
 	if err != nil || !isValid {
 		return nil, errors.New("invalid signature")
 	}
@@ -584,7 +584,7 @@ func HandleResizeChannel(rpc *RPCRequest, db *gorm.DB, signer *Signer) (*RPCResp
 		return nil, fmt.Errorf("asset not found: %s", channel.Token)
 	}
 
-	ledger := GetParticipantLedger(db, channel.ParticipantA)
+	ledger := GetParticipantLedger(db, channel.Participant)
 	balance, err := ledger.Balance(channel.ChannelID, asset.Symbol)
 	if err != nil {
 		return nil, fmt.Errorf("failed to check participant A balance: %w", err)
@@ -693,7 +693,7 @@ func HandleCloseChannel(rpc *RPCRequest, db *gorm.DB, signer *Signer) (*RPCRespo
 		return nil, errors.New("error serializing message")
 	}
 
-	isValid, err := ValidateSignature(reqBytes, rpc.Sig[0], channel.ParticipantA)
+	isValid, err := ValidateSignature(reqBytes, rpc.Sig[0], channel.Participant)
 	if err != nil || !isValid {
 		return nil, errors.New("invalid signature")
 	}
@@ -706,7 +706,7 @@ func HandleCloseChannel(rpc *RPCRequest, db *gorm.DB, signer *Signer) (*RPCRespo
 		return nil, fmt.Errorf("asset not found: %s", channel.Token)
 	}
 
-	ledger := GetParticipantLedger(db, channel.ParticipantA)
+	ledger := GetParticipantLedger(db, channel.Participant)
 	balance, err := ledger.Balance(channel.ChannelID, asset.Symbol)
 	if err != nil {
 		return nil, fmt.Errorf("failed to check participant A balance: %w", err)
@@ -817,7 +817,7 @@ func HandleGetChannels(rpc *RPCRequest, db *gorm.DB) (*RPCResponse, error) {
 		for _, channel := range channels {
 			channelResponses = append(channelResponses, ChannelResponse{
 				ChannelID:   channel.ChannelID,
-				Participant: channel.ParticipantA,
+				Participant: channel.Participant,
 				Status:      channel.Status,
 				Token:       channel.Token,
 				Amount:      channel.Amount,

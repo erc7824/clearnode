@@ -12,8 +12,8 @@ type Entry struct {
 	ID          uint            `gorm:"primaryKey"`
 	AccountID   string          `gorm:"column:account_id;not null;index:idx_account_asset_symbol;index:idx_account_participant"`
 	AccountType AccountType     `gorm:"column:account_type;not null"`
-	Participant string          `gorm:"column:participant;not null;index:idx_account_participant"`
 	AssetSymbol string          `gorm:"column:asset_symbol;not null;index:idx_account_asset_symbol"`
+	Participant string          `gorm:"column:participant;not null;index:idx_account_participant"`
 	Credit      decimal.Decimal `gorm:"column:credit;type:decimal(38,18);not null"`
 	Debit       decimal.Decimal `gorm:"column:debit;type:decimal(38,18);not null"`
 	CreatedAt   time.Time

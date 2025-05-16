@@ -6,9 +6,9 @@ import (
 )
 
 type Asset struct {
-	Symbol       string         `gorm:"column:symbol;index"`             // e.g. "usdc"
-	TokenAddress common.Address `gorm:"column:token_address;primaryKey"` // part of primaryKey
-	ChainID      uint32         `gorm:"column:chain_id;primaryKey"`      // part of primaryKey
+	TokenAddress common.Address `gorm:"column:token;primaryKey"`    // part of primaryKey
+	ChainID      uint32         `gorm:"column:chain_id;primaryKey"` // part of primaryKey
+	Symbol       string         `gorm:"column:symbol;index"`        // e.g. "usdc"
 	Decimals     uint8          `gorm:"column:decimals;not null"`
 }
 
