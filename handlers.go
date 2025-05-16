@@ -780,7 +780,7 @@ func HandleGetChannels(rpc *RPCRequest, db *gorm.DB) (*RPCResponse, error) {
 				Status:      channel.Status,
 				Token:       channel.Token,
 				Amount:      channel.Amount,
-				NetworkID:   channel.NetworkID,
+				NetworkID:   channel.ChainID,
 				CreatedAt:   channel.CreatedAt.Format(time.RFC3339),
 				UpdatedAt:   channel.UpdatedAt.Format(time.RFC3339),
 			})

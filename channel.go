@@ -29,7 +29,7 @@ type Channel struct {
 	Nonce        uint64        `gorm:"column:nonce;default:0"`
 	Version      uint64        `gorm:"column:version;default:0"`
 	Adjudicator  string        `gorm:"column:adjudicator;not null"`
-	NetworkID    string        `gorm:"column:network_id;not null"`
+	ChainID      uint32        `gorm:"column:chain_id;not null"`
 	Token        string        `gorm:"column:token;not null"`
 	Amount       uint64        `gorm:"column:amount;not null"`
 	CreatedAt    time.Time
@@ -43,12 +43,12 @@ func (Channel) TableName() string {
 
 // CreateChannel creates a new channel in the database
 // For real channels, participantB is always the broker application
-func CreateChannel(tx *gorm.DB, channelID, participantA string, nonce uint64, adjudicator string, networkID string, tokenAddress string, amount uint64) error {
+func CreateChannel(tx *gorm.DB, channelID, participantA string, nonce uint64, adjudicator string, chainID uint32, tokenAddress string, amount uint64) error {
 	channel := Channel{
 		ChannelID:    channelID,
 		ParticipantA: participantA,
 		ParticipantB: BrokerAddress, // Always use broker address for channels
-		NetworkID:    networkID,     // Set the network ID for channels
+		ChainID:      chainID,       // Set the network ID for channels
 		Status:       ChannelStatusJoining,
 		Nonce:        nonce,
 		Adjudicator:  adjudicator,
@@ -62,7 +62,7 @@ func CreateChannel(tx *gorm.DB, channelID, participantA string, nonce uint64, ad
 		return fmt.Errorf("failed to create channel: %w", err)
 	}
 
-	log.Printf("Created new channel with ID: %s, network: %s", channelID, networkID)
+	log.Printf("Created new channel with ID: %s, chainID: %s", channelID, chainID)
 	return nil
 }
 
@@ -100,9 +100,9 @@ func getChannelsForParticipant(tx *gorm.DB, participant string) ([]Channel, erro
 }
 
 // CheckExistingChannels checks if there is an existing open channel on the same network between participant A and B
-func CheckExistingChannels(tx *gorm.DB, participantA, participantB, networkID string) (*Channel, error) {
+func CheckExistingChannels(tx *gorm.DB, participantA, participantB string, chainID uint32) (*Channel, error) {
 	var channel Channel
-	err := tx.Where("participant_a = ? AND participant_b = ? AND network_id = ? AND status = ?", participantA, participantB, networkID, ChannelStatusOpen).
+	err := tx.Where("participant_a = ? AND participant_b = ? AND chain_id = ? AND status = ?", participantA, participantB, chainID, ChannelStatusOpen).
 		First(&channel).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
