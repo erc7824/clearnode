@@ -23,7 +23,7 @@ type Channel struct {
 	ChannelID   string        `gorm:"column:channel_id;uniqueIndex;"`
 	ChainID     uint32        `gorm:"column:chain_id;primaryKey;not null"`
 	Token       string        `gorm:"column:token;primaryKey;not null"`
-	Participant string        `gorm:"column:participant;not null"`
+	Participant string        `gorm:"column:participant;primaryKey;not null"`
 	Amount      uint64        `gorm:"column:amount;not null"`
 	Status      ChannelStatus `gorm:"column:status;not null;"`
 	Challenge   uint64        `gorm:"column:challenge;default:0"`
@@ -59,7 +59,7 @@ func CreateChannel(tx *gorm.DB, channelID, participantA string, nonce uint64, ad
 		return fmt.Errorf("failed to create channel: %w", err)
 	}
 
-	log.Printf("Created new channel with ID: %s, chainID: %s", channelID, chainID)
+	log.Printf("Created new channel with ID: %s, chainID: %d", channelID, chainID)
 	return nil
 }
 
@@ -79,7 +79,7 @@ func GetChannelByID(tx *gorm.DB, channelID string) (*Channel, error) {
 // getChannelsForParticipant finds all channels for a participant
 func getChannelsForParticipant(tx *gorm.DB, participant string) ([]Channel, error) {
 	var channels []Channel
-	if err := tx.Where("participant_a = ?",
+	if err := tx.Where("participant = ?",
 		participant).Order("created_at DESC").Find(&channels).Error; err != nil {
 		return nil, fmt.Errorf("error finding channels for participant %s: %w", participant, err)
 	}

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/shopspring/decimal"
@@ -50,6 +51,7 @@ func (l *ParticipantLedger) Record(accountID string, assetSymbol string, amount 
 		return nil
 	}
 
+	fmt.Println("recording entry for: ", l.participant, " in account ", accountID, " ", assetSymbol, " ", amount)
 	return l.db.Create(entry).Error
 }
 
@@ -59,7 +61,7 @@ func (l *ParticipantLedger) Balance(accountID string, assetSymbol string) (decim
 	}
 	var res result
 	if err := l.db.Model(&Entry{}).
-		Where("account_id = ? AND asset_symbol = ?", accountID, assetSymbol).
+		Where("account_id = ? AND asset_symbol = ? AND participant = ?", accountID, assetSymbol, l.participant).
 		Select("COALESCE(SUM(credit),0) - COALESCE(SUM(debit),0) AS balance").
 		Scan(&res).Error; err != nil {
 		return decimal.Zero, err
