@@ -6,30 +6,28 @@ import (
 )
 
 type Asset struct {
-	ID       uint           `gorm:"primaryKey;column:id;autoIncrement"`
-	AssetID  string         `gorm:"column:asset_id;index"` // "usdc" - internal unified asset id
-	Token    common.Address `gorm:"column:token;not null;uniqueIndex:token_chain"`
-	ChainID  uint32         `gorm:"column:chain_id;not null;uniqueIndex:token_chain"`
-	Symbol   string         `gorm:"column:symbol;not null"`
-	Decimals uint8          `gorm:"column:decimals;not null"`
+	Symbol       string         `gorm:"column:symbol;index"`             // e.g. "usdc"
+	TokenAddress common.Address `gorm:"column:token_address;primaryKey"` // part of primaryKey
+	ChainID      uint32         `gorm:"column:chain_id;primaryKey"`      // part of primaryKey
+	Decimals     uint8          `gorm:"column:decimals;not null"`
 }
 
 func (Asset) TableName() string {
 	return "assets"
 }
 
-func GetAssetByToken(db *gorm.DB, token string, chainID uint32) (*Asset, error) {
+func GetAssetByToken(db *gorm.DB, tokenAddress string, chainID uint32) (*Asset, error) {
 	var asset Asset
-	err := db.Where("token = ? AND chain_id = ?", token, chainID).First(&asset).Error
+	err := db.Where("token_address = ? AND chain_id = ?", tokenAddress, chainID).First(&asset).Error
 	if err == gorm.ErrRecordNotFound {
 		return nil, nil
 	}
 	return &asset, err
 }
 
-func GetTokenByAsset(db *gorm.DB, assetID string, chainID uint32) (*Asset, error) {
+func GetAssetBySymbol(db *gorm.DB, symbol string, chainID uint32) (*Asset, error) {
 	var asset Asset
-	err := db.Where("asset_id = ? AND chain_id = ?", assetID, chainID).First(&asset).Error
+	err := db.Where("symbol = ? AND chain_id = ?", symbol, chainID).First(&asset).Error
 	if err == gorm.ErrRecordNotFound {
 		return nil, nil
 	}

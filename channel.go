@@ -6,7 +6,6 @@ import (
 	"log"
 	"time"
 
-	"github.com/shopspring/decimal"
 	"gorm.io/gorm"
 )
 
@@ -21,18 +20,18 @@ var (
 
 // Channel represents a state channel between participants
 type Channel struct {
-	ID           uint            `gorm:"primaryKey"`
-	ChannelID    string          `gorm:"column:channel_id;uniqueIndex;"`
-	ParticipantA string          `gorm:"column:participant_a;not null"`
-	ParticipantB string          `gorm:"column:participant_b;not null"`
-	Status       ChannelStatus   `gorm:"column:status;not null;"`
-	Challenge    uint64          `gorm:"column:challenge;default:0"`
-	Nonce        uint64          `gorm:"column:nonce;default:0"`
-	Version      uint64          `gorm:"column:version;default:0"`
-	Adjudicator  string          `gorm:"column:adjudicator;not null"`
-	NetworkID    string          `gorm:"column:network_id;not null"`
-	Token        string          `gorm:"column:token;not null"`
-	Amount       decimal.Decimal `gorm:"column:amount;not null"`
+	ID           uint          `gorm:"primaryKey"`
+	ChannelID    string        `gorm:"column:channel_id;uniqueIndex;"`
+	ParticipantA string        `gorm:"column:participant_a;not null"`
+	ParticipantB string        `gorm:"column:participant_b;not null"`
+	Status       ChannelStatus `gorm:"column:status;not null;"`
+	Challenge    uint64        `gorm:"column:challenge;default:0"`
+	Nonce        uint64        `gorm:"column:nonce;default:0"`
+	Version      uint64        `gorm:"column:version;default:0"`
+	Adjudicator  string        `gorm:"column:adjudicator;not null"`
+	NetworkID    string        `gorm:"column:network_id;not null"`
+	Token        string        `gorm:"column:token;not null"`
+	Amount       uint64        `gorm:"column:amount;not null"`
 	CreatedAt    time.Time
 	UpdatedAt    time.Time
 }
@@ -44,7 +43,7 @@ func (Channel) TableName() string {
 
 // CreateChannel creates a new channel in the database
 // For real channels, participantB is always the broker application
-func CreateChannel(tx *gorm.DB, channelID, participantA string, nonce uint64, adjudicator string, networkID string, tokenAddress string, amount decimal.Decimal) error {
+func CreateChannel(tx *gorm.DB, channelID, participantA string, nonce uint64, adjudicator string, networkID string, tokenAddress string, amount uint64) error {
 	channel := Channel{
 		ChannelID:    channelID,
 		ParticipantA: participantA,
