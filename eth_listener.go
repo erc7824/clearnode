@@ -37,9 +37,8 @@ type LogHandler func(l types.Log)
 func listenEvents(
 	ctx context.Context,
 	client bind.ContractBackend,
-	subID string,
 	contractAddress common.Address,
-	networkID string,
+	chainID uint32,
 	lastBlock uint64,
 	handler LogHandler,
 ) {
@@ -47,7 +46,7 @@ func listenEvents(
 	var currentCh chan types.Log
 	var eventSubscription event.Subscription
 
-	logger.Infow("starting listening events", "subID", subID, "networkID", networkID, "contractAddress", contractAddress.String())
+	logger.Infow("starting listening events", "chainID", chainID, "contractAddress", contractAddress.String())
 	for {
 		if eventSubscription == nil {
 			waitForBackOffTimeout(int(backOffCount.Load()))
@@ -59,27 +58,27 @@ func listenEvents(
 			}
 			eventSub, err := client.SubscribeFilterLogs(ctx, watchFQ, currentCh)
 			if err != nil {
-				logger.Errorw("failed to subscribe on events", "error", err, "subID", subID, "networkID", networkID, "contractAddress", contractAddress.String())
+				logger.Errorw("failed to subscribe on events", "error", err, "chainID", chainID, "contractAddress", contractAddress.String())
 				backOffCount.Add(1)
 				continue
 			}
 
 			eventSubscription = eventSub
-			logger.Infow("watching events", "subID", subID, "networkID", networkID, "contractAddress", contractAddress.String())
+			logger.Infow("watching events", "chainID", chainID, "contractAddress", contractAddress.String())
 			backOffCount.Store(0)
 		}
 
 		select {
 		case eventLog := <-currentCh:
 			lastBlock = eventLog.BlockNumber
-			logger.Debugw("received new event", "subID", subID, "networkID", networkID, "contractAddress", contractAddress.String(), "blockNumber", lastBlock, "logIndex", eventLog.Index)
+			logger.Debugw("received new event", "chainID", chainID, "contractAddress", contractAddress.String(), "blockNumber", lastBlock, "logIndex", eventLog.Index)
 			handler(eventLog)
 		case err := <-eventSubscription.Err():
 			if err != nil {
-				logger.Errorw("event subscription error", "error", err, "subID", subID, "networkID", networkID, "contractAddress", contractAddress.String())
+				logger.Errorw("event subscription error", "error", err, "chainID", chainID, "contractAddress", contractAddress.String())
 				eventSubscription.Unsubscribe()
 			} else {
-				logger.Debugw("subscription closed, resubscribing", "subID", subID, "networkID", networkID, "contractAddress", contractAddress.String())
+				logger.Debugw("subscription closed, resubscribing", "chainID", chainID, "contractAddress", contractAddress.String())
 			}
 
 			eventSubscription = nil

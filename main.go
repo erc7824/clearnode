@@ -12,8 +12,6 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
-var BrokerAddress string
-
 func main() {
 	config, err := LoadConfig()
 	if err != nil {
@@ -25,7 +23,6 @@ func main() {
 		log.Fatalf("Failed to setup database: %v", err)
 	}
 
-	ledger := NewLedger(db)
 	signer, err := NewSigner(config.privateKeyHex)
 	if err != nil {
 		log.Fatalf("failed to initialise signer: %v", err)
@@ -38,7 +35,7 @@ func main() {
 	custodyClients := make(map[string]*Custody)
 
 	for name, network := range config.networks {
-		client, err := NewCustody(signer, ledger, network.InfuraURL, network.CustodyAddress, network.ChainID)
+		client, err := NewCustody(signer, db, network.InfuraURL, network.CustodyAddress, network.ChainID)
 		if err != nil {
 			log.Printf("Warning: Failed to initialize %s blockchain client: %v", name, err)
 			continue
@@ -49,7 +46,7 @@ func main() {
 
 	go metrics.RecordMetricsPeriodically(db, custodyClients)
 
-	unifiedWSHandler := NewUnifiedWSHandler(signer, ledger, metrics, rpcStore)
+	unifiedWSHandler := NewUnifiedWSHandler(signer, db, metrics, rpcStore, config)
 	http.HandleFunc("/ws", unifiedWSHandler.HandleConnection)
 
 	// Set up a separate mux for metrics

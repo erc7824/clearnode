@@ -15,16 +15,16 @@ import (
 // Each prefix is used to find corresponding environment variables:
 // - {PREFIX}_INFURA_URL: The Infura endpoint URL for the network
 // - {PREFIX}_CUSTODY_CONTRACT_ADDRESS: The custody contract address
-var knownNetworks = map[string]string{
-	"POLYGON": "137",
-	"CELO":    "42220",
-	"BASE":    "8453",
+var knownNetworks = map[string]uint32{
+	"POLYGON": 137,
+	"CELO":    42220,
+	"BASE":    8453,
 }
 
 // NetworkConfig represents configuration for a blockchain network
 type NetworkConfig struct {
 	Name           string
-	ChainID        string
+	ChainID        uint32
 	InfuraURL      string
 	CustodyAddress string
 }
@@ -131,7 +131,7 @@ func setupDatabase(dsn string) (*gorm.DB, error) {
 
 	// Auto-migrate the models.
 	log.Println("Running database migrations...")
-	if err := db.AutoMigrate(&Entry{}, &Channel{}, &VApp{}, &RPCRecord{}); err != nil {
+	if err := db.AutoMigrate(&Entry{}, &Channel{}, &AppSession{}, &RPCRecord{}, &Asset{}); err != nil {
 		return nil, err
 	}
 	log.Println("Database migrations completed successfully")

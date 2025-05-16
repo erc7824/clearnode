@@ -14,6 +14,7 @@ import (
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/lib/pq"
+	"github.com/shopspring/decimal"
 	"gorm.io/gorm"
 )
 
@@ -27,17 +28,22 @@ type AppDefinition struct {
 	Nonce        uint64   `json:"nonce,omitempty"`
 }
 
-// CreateApplicationParams represents parameters needed for virtual app creation
-type CreateApplicationParams struct {
-	Definition  AppDefinition `json:"definition"`
-	Token       string        `json:"token"`
-	Allocations []int64       `json:"allocations"`
+// CreateAppSessionParams represents parameters needed for virtual app creation
+type CreateAppSessionParams struct {
+	Definition  AppDefinition   `json:"definition"`
+	Allocations []AppAllocation `json:"allocations"`
+}
+
+type AppAllocation struct {
+	Participant string          `json:"participant"`
+	AssetSymbol string          `json:"asset_symbol"`
+	Amount      decimal.Decimal `json:"amount"`
 }
 
 type CreateAppSignData struct {
 	RequestID uint64
 	Method    string
-	Params    []CreateApplicationParams
+	Params    []CreateAppSessionParams
 	Timestamp uint64
 }
 
@@ -46,16 +52,16 @@ func (r CreateAppSignData) MarshalJSON() ([]byte, error) {
 	return json.Marshal(arr)
 }
 
-// CloseApplicationParams represents parameters needed for virtual app closure
-type CloseApplicationParams struct {
-	AppID            string  `json:"app_id"`
-	FinalAllocations []int64 `json:"allocations"`
+// CloseAppSessionParams represents parameters needed for virtual app closure
+type CloseAppSessionParams struct {
+	AppSessionID string          `json:"app_session_id"`
+	Allocations  []AppAllocation `json:"allocations"`
 }
 
 type CloseAppSignData struct {
 	RequestID uint64
 	Method    string
-	Params    []CloseApplicationParams
+	Params    []CloseAppSessionParams
 	Timestamp uint64
 }
 
@@ -64,17 +70,17 @@ func (r CloseAppSignData) MarshalJSON() ([]byte, error) {
 	return json.Marshal(arr)
 }
 
-// AppResponse represents response data for application operations
-type AppResponse struct {
-	AppID  string `json:"app_id"`
-	Status string `json:"status"`
+// AppSessionResponse represents response data for application operations
+type AppSessionResponse struct {
+	AppSessionID string `json:"app_session_id"`
+	Status       string `json:"status"`
 }
 
 // ResizeChannelParams represents parameters needed for resizing a channel
 type ResizeChannelParams struct {
-	ChannelID         string   `json:"channel_id"`
-	ParticipantChange *big.Int `json:"participant_change"` // how much user wants to deposit or withdraw.
-	FundsDestination  string   `json:"funds_destination"`
+	ChannelID        string          `json:"channel_id"`
+	NewAmount        decimal.Decimal `json:"new_amount"`
+	FundsDestination string          `json:"funds_destination"`
 }
 
 // ResizeChannelResponse represents the response for resizing a channel
@@ -82,7 +88,7 @@ type ResizeChannelResponse struct {
 	ChannelID   string       `json:"channel_id"`
 	StateData   string       `json:"state_data"`
 	Intent      uint8        `json:"intent"`
-	Version     *big.Int     `json:"version"`
+	Version     uint64       `json:"version"`
 	Allocations []Allocation `json:"allocations"`
 	StateHash   string       `json:"state_hash"`
 	Signature   Signature    `json:"server_signature"`
@@ -117,7 +123,7 @@ type CloseChannelParams struct {
 type CloseChannelResponse struct {
 	ChannelID        string       `json:"channel_id"`
 	Intent           uint8        `json:"intent"`
-	Version          *big.Int     `json:"version"`
+	Version          uint64       `json:"version"`
 	StateData        string       `json:"state_data"`
 	FinalAllocations []Allocation `json:"allocations"`
 	StateHash        string       `json:"state_hash"`
@@ -131,10 +137,14 @@ type ChannelResponse struct {
 	Status      ChannelStatus `json:"status"`
 	Token       string        `json:"token"`
 	// Total amount in the channel (user + broker)
-	Amount    int64  `json:"amount"`
-	NetworkID string `json:"network_id"`
-	CreatedAt string `json:"created_at"`
-	UpdatedAt string `json:"updated_at"`
+	Amount      *big.Int `json:"amount"`
+	ChainID     uint32   `json:"chain_id"`
+	Adjudicator string   `json:"adjudicator"`
+	Challenge   uint64   `json:"challenge"`
+	Nonce       uint64   `json:"nonce"`
+	Version     uint64   `json:"version"`
+	CreatedAt   string   `json:"created_at"`
+	UpdatedAt   string   `json:"updated_at"`
 }
 
 type Signature struct {
@@ -143,63 +153,78 @@ type Signature struct {
 	S string `json:"s,string"`
 }
 
-// AvailableBalance represents a participant's availability for virtual apps
-type AvailableBalance struct {
-	Address string `json:"address"`
-	Amount  int64  `json:"amount"`
+// NetworkInfo represents information about a supported network
+type NetworkInfo struct {
+	Name           string `json:"name"`
+	ChainID        uint32 `json:"chain_id"`
+	CustodyAddress string `json:"custody_address"`
 }
 
 // BrokerConfig represents the broker configuration information
 type BrokerConfig struct {
-	BrokerAddress string `json:"brokerAddress"`
+	BrokerAddress string        `json:"broker_address"`
+	Networks      []NetworkInfo `json:"networks"`
 }
 
 // HandleGetConfig returns the broker configuration
-func HandleGetConfig(rpc *RPCRequest) (*RPCResponse, error) {
-	config := BrokerConfig{
-		BrokerAddress: BrokerAddress,
+func HandleGetConfig(rpc *RPCMessage, config *Config, signer *Signer) (*RPCMessage, error) {
+	supportedNetworks := []NetworkInfo{}
+
+	// Populate the supported networks from the config
+	for name, networkConfig := range config.networks {
+		supportedNetworks = append(supportedNetworks, NetworkInfo{
+			Name:           name,
+			ChainID:        networkConfig.ChainID,
+			CustodyAddress: networkConfig.CustodyAddress,
+		})
 	}
 
-	rpcResponse := CreateResponse(rpc.Req.RequestID, "get_config", []any{config}, time.Now())
+	brokerConfig := BrokerConfig{
+		BrokerAddress: signer.GetAddress().Hex(),
+		Networks:      supportedNetworks,
+	}
+
+	rpcResponse := CreateResponse(rpc.Data.RequestID, "get_config", []any{brokerConfig}, time.Now())
 	return rpcResponse, nil
 }
 
 // HandlePing responds to a ping request with a pong response in RPC format
-func HandlePing(rpc *RPCRequest) (*RPCResponse, error) {
-	return CreateResponse(rpc.Req.RequestID, "pong", []any{}, time.Now()), nil
+func HandlePing(rpc *RPCMessage) (*RPCMessage, error) {
+	return CreateResponse(rpc.Data.RequestID, "pong", []any{}, time.Now()), nil
 }
 
 // HandleGetLedgerBalances returns a list of participants and their balances for a ledger account
-func HandleGetLedgerBalances(rpc *RPCRequest, ledger *Ledger) (*RPCResponse, error) {
+func HandleGetLedgerBalances(rpc *RPCMessage, address string, db *gorm.DB) (*RPCMessage, error) {
 	var accountID string
 
-	if len(rpc.Req.Params) > 0 {
-		paramsJSON, err := json.Marshal(rpc.Req.Params[0])
+	if len(rpc.Data.Params) > 0 {
+		paramsJSON, err := json.Marshal(rpc.Data.Params[0])
 		if err == nil {
 			var params map[string]string
 			if err := json.Unmarshal(paramsJSON, &params); err == nil {
-				accountID = params["acc"]
+				accountID = params["account_id"]
 			}
 		}
 	}
 
-	balances, err := GetAccountBalances(ledger.db, accountID)
+	ledger := GetParticipantLedger(db, address)
+	balances, err := ledger.GetBalances(accountID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to find account: %w", err)
 	}
 
-	rpcResponse := CreateResponse(rpc.Req.RequestID, rpc.Req.Method, []any{balances}, time.Now())
+	rpcResponse := CreateResponse(rpc.Data.RequestID, rpc.Data.Method, []any{balances}, time.Now())
 	return rpcResponse, nil
 }
 
 // HandleCreateApplication creates a virtual application between participants
-func HandleCreateApplication(rpc *RPCRequest, ledger *Ledger) (*RPCResponse, error) {
-	if len(rpc.Req.Params) < 1 {
+func HandleCreateApplication(rpc *RPCMessage, db *gorm.DB) (*RPCMessage, error) {
+	if len(rpc.Data.Params) < 1 {
 		return nil, errors.New("missing parameters")
 	}
 
-	var createApp CreateApplicationParams
-	paramsJSON, err := json.Marshal(rpc.Req.Params[0])
+	var createApp CreateAppSessionParams
+	paramsJSON, err := json.Marshal(rpc.Data.Params[0])
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse parameters: %w", err)
 	}
@@ -217,10 +242,6 @@ func HandleCreateApplication(rpc *RPCRequest, ledger *Ledger) (*RPCResponse, err
 		return nil, errors.New("number of allocations must be equal to participants")
 	}
 
-	if len(createApp.Allocations) != len(rpc.Intent) {
-		return nil, errors.New("number of allocations must be equal to intents")
-	}
-
 	if len(createApp.Definition.Weights) != len(createApp.Definition.Participants) {
 		return nil, errors.New("number of weights must be equal to participants")
 	}
@@ -231,22 +252,18 @@ func HandleCreateApplication(rpc *RPCRequest, ledger *Ledger) (*RPCResponse, err
 	}
 
 	if createApp.Definition.Nonce == 0 {
-		createApp.Definition.Nonce = rpc.Req.Timestamp
+		createApp.Definition.Nonce = rpc.Data.Timestamp
 	}
 
 	// Generate a unique ID for the virtual application
-	vAppID := nitrolite.GetChannelID(nitrolite.Channel{
-		Participants: participantsAddresses,
-		Adjudicator:  common.HexToAddress("0x0000000000000000000000000000000000000000"),
-		Challenge:    createApp.Definition.Challenge,
-		Nonce:        createApp.Definition.Nonce,
-	})
+	b, _ := json.Marshal(createApp.Definition)
+	appSessionID := crypto.Keccak256Hash(b)
 
 	req := CreateAppSignData{
-		RequestID: rpc.Req.RequestID,
-		Method:    rpc.Req.Method,
-		Params:    []CreateApplicationParams{{Definition: createApp.Definition, Token: createApp.Token, Allocations: createApp.Allocations}},
-		Timestamp: rpc.Req.Timestamp,
+		RequestID: rpc.Data.RequestID,
+		Method:    rpc.Data.Method,
+		Params:    []CreateAppSessionParams{{Definition: createApp.Definition, Allocations: createApp.Allocations}},
+		Timestamp: rpc.Data.Timestamp,
 	}
 
 	reqBytes, err := json.Marshal(req)
@@ -264,43 +281,30 @@ func HandleCreateApplication(rpc *RPCRequest, ledger *Ledger) (*RPCResponse, err
 	}
 
 	// Use a transaction to ensure atomicity for the entire operation
-	err = ledger.db.Transaction(func(tx *gorm.DB) error {
-		ledgerTx := &Ledger{db: tx}
-
-		for i, participant := range createApp.Definition.Participants {
-			participantChannel, err := getChannelForParticipant(tx, participant)
-			if err != nil {
-				return err
-			}
-
-			allocation := big.NewInt(createApp.Allocations[i])
-
-			if allocation.Cmp(big.NewInt(rpc.Intent[i])) != 0 {
-				return errors.New("intent must match allocation")
-			}
-
-			if allocation.Sign() < 0 {
+	err = db.Transaction(func(tx *gorm.DB) error {
+		for _, allocation := range createApp.Allocations {
+			if allocation.Amount.IsNegative() {
 				return errors.New("invalid allocation")
 			}
-
-			if allocation.Sign() > 0 {
-				if !recoveredAddresses[participant] {
-					return fmt.Errorf("missing signature for participant %s", participant)
+			if allocation.Amount.IsPositive() {
+				if !recoveredAddresses[allocation.Participant] {
+					return fmt.Errorf("missing signature for participant %s", allocation.Participant)
 				}
 			}
 
-			account := ledgerTx.SelectBeneficiaryAccount(participantChannel.ChannelID, participant)
-			balance, err := account.Balance()
+			participantLedger := GetParticipantLedger(tx, allocation.Participant)
+			balance, err := participantLedger.Balance(allocation.Participant, allocation.AssetSymbol)
 			if err != nil {
 				return fmt.Errorf("failed to check participant balance: %w", err)
 			}
-			if balance < allocation.Int64() {
+			if allocation.Amount.GreaterThan(balance) {
 				return errors.New("insufficient funds")
 			}
-
-			toAccount := ledgerTx.SelectBeneficiaryAccount(vAppID.Hex(), participant)
-			if err := account.Transfer(toAccount, allocation.Int64()); err != nil {
+			if err := participantLedger.Record(allocation.Participant, allocation.AssetSymbol, allocation.Amount.Neg()); err != nil {
 				return fmt.Errorf("failed to transfer funds from participant: %w", err)
+			}
+			if err := participantLedger.Record(appSessionID.Hex(), allocation.AssetSymbol, allocation.Amount); err != nil {
+				return fmt.Errorf("failed to transfer funds to virtual app: %w", err)
 			}
 		}
 
@@ -310,22 +314,19 @@ func HandleCreateApplication(rpc *RPCRequest, ledger *Ledger) (*RPCResponse, err
 		}
 
 		// Record the virtual app creation in state
-		vAppDB := &VApp{
+		appSession := &AppSession{
 			Protocol:     createApp.Definition.Protocol,
-			AppID:        vAppID.Hex(),
+			SessionID:    appSessionID.Hex(),
 			Participants: createApp.Definition.Participants,
 			Status:       ChannelStatusOpen,
 			Challenge:    createApp.Definition.Challenge,
 			Weights:      weights,
-			Token:        createApp.Token,
 			Quorum:       createApp.Definition.Quorum,
 			Nonce:        createApp.Definition.Nonce,
-			Version:      rpc.Req.Timestamp,
-			CreatedAt:    time.Now(),
-			UpdatedAt:    time.Now(),
+			Version:      rpc.Data.Timestamp,
 		}
 
-		if err := tx.Create(vAppDB).Error; err != nil {
+		if err := tx.Create(appSession).Error; err != nil {
 			return fmt.Errorf("failed to record virtual app: %w", err)
 		}
 
@@ -336,23 +337,23 @@ func HandleCreateApplication(rpc *RPCRequest, ledger *Ledger) (*RPCResponse, err
 		return nil, err
 	}
 
-	response := &AppResponse{
-		AppID:  vAppID.Hex(),
-		Status: string(ChannelStatusOpen),
+	response := &AppSessionResponse{
+		AppSessionID: appSessionID.Hex(),
+		Status:       string(ChannelStatusOpen),
 	}
 
-	rpcResponse := CreateResponse(rpc.Req.RequestID, rpc.Req.Method, []any{response}, time.Now())
+	rpcResponse := CreateResponse(rpc.Data.RequestID, rpc.Data.Method, []any{response}, time.Now())
 	return rpcResponse, nil
 }
 
-// HandleCloseApplication closes a virtual app and redistributes funds to participants
-func HandleCloseApplication(rpc *RPCRequest, ledger *Ledger) (*RPCResponse, error) {
-	if len(rpc.Req.Params) < 1 {
+// HandleCloseApplication closes a virtual app session and redistributes funds to participants
+func HandleCloseApplication(rpc *RPCMessage, db *gorm.DB) (*RPCMessage, error) {
+	if len(rpc.Data.Params) == 0 {
 		return nil, errors.New("missing parameters")
 	}
 
-	var params CloseApplicationParams
-	paramsJSON, err := json.Marshal(rpc.Req.Params[0])
+	var params CloseAppSessionParams
+	paramsJSON, err := json.Marshal(rpc.Data.Params[0])
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse parameters: %w", err)
 	}
@@ -361,15 +362,23 @@ func HandleCloseApplication(rpc *RPCRequest, ledger *Ledger) (*RPCResponse, erro
 		return nil, fmt.Errorf("invalid parameters format: %w", err)
 	}
 
-	if params.AppID == "" || len(params.FinalAllocations) == 0 {
+	if params.AppSessionID == "" || len(params.Allocations) == 0 {
 		return nil, errors.New("missing required parameters: app_id or allocations")
 	}
 
+	assets := map[string]struct{}{}
+	for _, a := range params.Allocations {
+		if a.Participant == "" || a.AssetSymbol == "" || a.Amount.IsNegative() {
+			return nil, errors.New("invalid allocation row")
+		}
+		assets[a.AssetSymbol] = struct{}{}
+	}
+
 	req := CloseAppSignData{
-		RequestID: rpc.Req.RequestID,
-		Method:    rpc.Req.Method,
-		Params:    []CloseApplicationParams{{AppID: params.AppID, FinalAllocations: params.FinalAllocations}},
-		Timestamp: rpc.Req.Timestamp,
+		RequestID: rpc.Data.RequestID,
+		Method:    rpc.Data.Method,
+		Params:    []CloseAppSessionParams{{AppSessionID: params.AppSessionID, Allocations: params.Allocations}},
+		Timestamp: rpc.Data.Timestamp,
 	}
 
 	reqBytes, err := json.Marshal(req)
@@ -377,82 +386,103 @@ func HandleCloseApplication(rpc *RPCRequest, ledger *Ledger) (*RPCResponse, erro
 		return nil, errors.New("error serializing message")
 	}
 
-	err = ledger.db.Transaction(func(tx *gorm.DB) error {
-		ledgerTx := &Ledger{db: tx}
-
-		// Fetch and validate the virtual app
-		var vApp VApp
-		if err := tx.Where("app_id = ? AND status = ?", params.AppID, ChannelStatusOpen).Order("nonce DESC").
-			First(&vApp).Error; err != nil {
+	err = db.Transaction(func(tx *gorm.DB) error {
+		var appSession AppSession
+		if err := tx.Where("session_id = ? AND status = ?", params.AppSessionID, ChannelStatusOpen).Order("nonce DESC").
+			First(&appSession).Error; err != nil {
 			return fmt.Errorf("virtual app not found or not open: %w", err)
 		}
 
-		participantWeights := make(map[string]int64, len(vApp.Participants))
-		for i, addr := range vApp.Participants {
-			participantWeights[strings.ToLower(addr)] = vApp.Weights[i]
+		participantWeights := map[string]int64{}
+		for i, addr := range appSession.Participants {
+			participantWeights[strings.ToLower(addr)] = appSession.Weights[i]
 		}
 
+		seen := map[string]bool{}
 		var totalWeight int64
 		for _, sigHex := range rpc.Sig {
 			recovered, err := RecoverAddress(reqBytes, sigHex)
 			if err != nil {
 				return err
 			}
-			if w, ok := participantWeights[strings.ToLower(recovered)]; ok && w > 0 {
-				totalWeight += w
+			recovered = strings.ToLower(recovered)
+			if seen[recovered] {
+				return errors.New("duplicate signature")
+			}
+			seen[recovered] = true
+			weight, ok := participantWeights[recovered]
+			if !ok {
+				return fmt.Errorf("signature from unknown participant %s", recovered)
+			}
+			if weight <= 0 {
+				return fmt.Errorf("zero weight for signer %s", recovered)
+			}
+			totalWeight += weight
+		}
+		if totalWeight < int64(appSession.Quorum) {
+			return fmt.Errorf("quorum not met: %d / %d", totalWeight, appSession.Quorum)
+		}
+
+		appSessionBalance := map[string]decimal.Decimal{}
+		for _, p := range appSession.Participants {
+			ledger := GetParticipantLedger(tx, p)
+			for asset := range assets {
+				bal, err := ledger.Balance(appSession.SessionID, asset)
+				if err != nil {
+					return fmt.Errorf("failed to read balance for %s:%s: %w", p, asset, err)
+				}
+				appSessionBalance[asset] = appSessionBalance[asset].Add(bal)
 			}
 		}
 
-		if totalWeight < int64(vApp.Quorum) {
-			return fmt.Errorf("quorum not met: %d/%d", totalWeight, vApp.Quorum)
-		}
+		allocationSum := map[string]decimal.Decimal{}
+		participantsSeen := map[string]bool{}
 
-		fmt.Println("Quorum met:", totalWeight, "of", vApp.Quorum)
-
-		if len(params.FinalAllocations) != len(vApp.Participants) {
-			return errors.New("number of allocations must match number of participants")
-		}
-
-		// Process allocations
-		totalVirtualAppBalance, sumAllocations := int64(0), int64(0)
-		for i, participant := range vApp.Participants {
-			allocation := params.FinalAllocations[i]
-			if allocation < 0 {
-				return errors.New("invalid allocation")
+		for _, alloc := range params.Allocations {
+			addr := strings.ToLower(alloc.Participant)
+			if _, ok := participantWeights[addr]; !ok {
+				return fmt.Errorf("allocation to non-participant %s", alloc.Participant)
 			}
+			if participantsSeen[addr] {
+				return fmt.Errorf("participant %s appears more than once", alloc.Participant)
+			}
+			participantsSeen[addr] = true
 
-			// Adjust balances
-			virtualBalance := ledgerTx.SelectBeneficiaryAccount(vApp.AppID, participant)
-			participantBalance, err := virtualBalance.Balance()
+			ledger := GetParticipantLedger(tx, alloc.Participant)
+			balance, err := ledger.Balance(appSession.SessionID, alloc.AssetSymbol)
 			if err != nil {
-				return fmt.Errorf("failed to check balance for %s: %w", participant, err)
-			}
-			totalVirtualAppBalance += participantBalance
-
-			if err := virtualBalance.Record(-participantBalance); err != nil {
-				return fmt.Errorf("failed to adjust virtual balance for %s: %w", participant, err)
+				return fmt.Errorf("failed to get participant balance: %w", err)
 			}
 
-			channel, err := getChannelForParticipant(tx, participant)
-			if err != nil {
-				return fmt.Errorf("failed to find channel for %s: %w", participant, err)
+			// Debit session, credit participant
+			if err := ledger.Record(appSession.SessionID, alloc.AssetSymbol, balance.Neg()); err != nil {
+				return fmt.Errorf("failed to debit session: %w", err)
+			}
+			if err := ledger.Record(alloc.Participant, alloc.AssetSymbol, alloc.Amount); err != nil {
+				return fmt.Errorf("failed to credit participant: %w", err)
 			}
 
-			toAccount := ledgerTx.SelectBeneficiaryAccount(channel.ChannelID, participant)
-			if err := toAccount.Record(allocation); err != nil {
-				return fmt.Errorf("failed to adjust balance for %s: %w", participant, err)
-			}
-			sumAllocations += allocation
+			allocationSum[alloc.AssetSymbol] = allocationSum[alloc.AssetSymbol].Add(alloc.Amount)
 		}
 
-		if sumAllocations != totalVirtualAppBalance {
-			return errors.New("allocation mismatch with virtual app balance")
+		// Every participant must appear exactly once
+		if len(participantsSeen) != len(appSession.Participants) {
+			return errors.New("allocations must be provided for every participant exactly once")
 		}
 
-		// Close the virtual app
-		return tx.Model(&vApp).Updates(map[string]any{
-			"status":     ChannelStatusClosed,
-			"updated_at": time.Now(),
+		for asset, bal := range appSessionBalance {
+			if alloc, ok := allocationSum[asset]; !ok || !bal.Equal(alloc) {
+				return fmt.Errorf("asset %s not fully redistributed", asset)
+			}
+		}
+		for asset := range allocationSum {
+			if _, ok := appSessionBalance[asset]; !ok {
+				return fmt.Errorf("allocation references unknown asset %s", asset)
+			}
+		}
+
+		return tx.Model(&appSession).Updates(map[string]any{
+			"status": ChannelStatusClosed,
 		}).Error
 	})
 
@@ -460,35 +490,35 @@ func HandleCloseApplication(rpc *RPCRequest, ledger *Ledger) (*RPCResponse, erro
 		return nil, err
 	}
 
-	response := &AppResponse{
-		AppID:  params.AppID,
-		Status: string(ChannelStatusClosed),
+	response := &AppSessionResponse{
+		AppSessionID: params.AppSessionID,
+		Status:       string(ChannelStatusClosed),
 	}
 
-	rpcResponse := CreateResponse(rpc.Req.RequestID, rpc.Req.Method, []any{response}, time.Now())
+	rpcResponse := CreateResponse(rpc.Data.RequestID, rpc.Data.Method, []any{response}, time.Now())
 	return rpcResponse, nil
 }
 
 // HandleGetAppDefinition returns the application definition for a ledger account
-func HandleGetAppDefinition(rpc *RPCRequest, ledger *Ledger) (*RPCResponse, error) {
-	var accountID string
+func HandleGetAppDefinition(rpc *RPCMessage, db *gorm.DB) (*RPCMessage, error) {
+	var sessionID string
 
-	if len(rpc.Req.Params) > 0 {
-		paramsJSON, err := json.Marshal(rpc.Req.Params[0])
+	if len(rpc.Data.Params) > 0 {
+		paramsJSON, err := json.Marshal(rpc.Data.Params[0])
 		if err == nil {
 			var params map[string]string
 			if err := json.Unmarshal(paramsJSON, &params); err == nil {
-				accountID = params["acc"]
+				sessionID = params["app_session_id"]
 			}
 		}
 	}
 
-	if accountID == "" {
+	if sessionID == "" {
 		return nil, errors.New("missing account ID")
 	}
 
-	var vApp VApp
-	if err := ledger.db.Where("app_id = ?", accountID).First(&vApp).Error; err != nil {
+	var vApp AppSession
+	if err := db.Where("session_id = ?", sessionID).First(&vApp).Error; err != nil {
 		return nil, fmt.Errorf("failed to find application: %w", err)
 	}
 
@@ -505,18 +535,18 @@ func HandleGetAppDefinition(rpc *RPCRequest, ledger *Ledger) (*RPCResponse, erro
 		appDef.Weights[i] = uint64(vApp.Weights[i])
 	}
 
-	rpcResponse := CreateResponse(rpc.Req.RequestID, rpc.Req.Method, []any{appDef}, time.Now())
+	rpcResponse := CreateResponse(rpc.Data.RequestID, rpc.Data.Method, []any{appDef}, time.Now())
 	return rpcResponse, nil
 }
 
 // HandleResizeChannel processes a request to resize a payment channel
-func HandleResizeChannel(rpc *RPCRequest, ledger *Ledger, signer *Signer) (*RPCResponse, error) {
-	if len(rpc.Req.Params) < 1 {
+func HandleResizeChannel(rpc *RPCMessage, db *gorm.DB, signer *Signer) (*RPCMessage, error) {
+	if len(rpc.Data.Params) < 1 {
 		return nil, errors.New("missing parameters")
 	}
 
 	var params ResizeChannelParams
-	paramsJSON, err := json.Marshal(rpc.Req.Params[0])
+	paramsJSON, err := json.Marshal(rpc.Data.Params[0])
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse parameters: %w", err)
 	}
@@ -525,20 +555,16 @@ func HandleResizeChannel(rpc *RPCRequest, ledger *Ledger, signer *Signer) (*RPCR
 		return nil, fmt.Errorf("invalid parameters format: %w", err)
 	}
 
-	if params.ParticipantChange == nil {
-		return nil, errors.New("missing participant change amount")
-	}
-
-	channel, err := GetChannelByID(ledger.db, params.ChannelID)
+	channel, err := GetChannelByID(db, params.ChannelID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to find channel: %w", err)
 	}
 
 	req := ResizeChannelSignData{
-		RequestID: rpc.Req.RequestID,
-		Method:    rpc.Req.Method,
-		Params:    []ResizeChannelParams{{ChannelID: params.ChannelID, ParticipantChange: params.ParticipantChange, FundsDestination: params.FundsDestination}},
-		Timestamp: rpc.Req.Timestamp,
+		RequestID: rpc.Data.RequestID,
+		Method:    rpc.Data.Method,
+		Params:    []ResizeChannelParams{{ChannelID: params.ChannelID, NewAmount: params.NewAmount, FundsDestination: params.FundsDestination}},
+		Timestamp: rpc.Data.Timestamp,
 	}
 
 	reqBytes, err := json.Marshal(req)
@@ -546,40 +572,46 @@ func HandleResizeChannel(rpc *RPCRequest, ledger *Ledger, signer *Signer) (*RPCR
 		return nil, errors.New("error serializing message")
 	}
 
-	isValid, err := ValidateSignature(reqBytes, rpc.Sig[0], channel.ParticipantA)
+	isValid, err := ValidateSignature(reqBytes, rpc.Sig[0], channel.Participant)
 	if err != nil || !isValid {
 		return nil, errors.New("invalid signature")
 	}
 
-	// Get current account balance
-	account := ledger.SelectBeneficiaryAccount(channel.ChannelID, channel.ParticipantA)
-	balance, err := account.Balance()
+	asset, err := GetAssetBySymbol(db, channel.Token, channel.ChainID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to find asset: %w", err)
+	}
+	if asset == nil {
+		return nil, fmt.Errorf("asset not found: %s", channel.Token)
+	}
+
+	ledger := GetParticipantLedger(db, channel.Participant)
+	balance, err := ledger.Balance(channel.ChannelID, asset.Symbol)
 	if err != nil {
 		return nil, fmt.Errorf("failed to check participant A balance: %w", err)
 	}
 
-	brokerPart := channel.Amount - balance
-
-	// Calculate the new channel amount
-	newAmount := new(big.Int).Add(big.NewInt(balance), params.ParticipantChange)
-	if newAmount.Sign() < 0 {
-		return nil, errors.New("invalid resize amount")
+	if balance.LessThan(params.NewAmount) {
+		return nil, errors.New("insufficient unified balance")
 	}
+
+	rawNewChannelAmount := params.NewAmount.Shift(int32(asset.Decimals)).BigInt()
+	brokerPart := channel.Amount - rawNewChannelAmount.Uint64()
 
 	allocations := []nitrolite.Allocation{
 		{
 			Destination: common.HexToAddress(params.FundsDestination),
 			Token:       common.HexToAddress(channel.Token),
-			Amount:      newAmount,
+			Amount:      rawNewChannelAmount,
 		},
 		{
-			Destination: common.HexToAddress(channel.ParticipantB),
+			Destination: signer.GetAddress(),
 			Token:       common.HexToAddress(channel.Token),
 			Amount:      big.NewInt(0),
 		},
 	}
 
-	resizeAmounts := []*big.Int{params.ParticipantChange, big.NewInt(-brokerPart)} // Always release broker funds if there is a surplus.
+	resizeAmounts := []*big.Int{big.NewInt(0), big.NewInt(-int64(brokerPart))} // Always release broker funds if there is a surplus.
 
 	intentionType, err := abi.NewType("int256[]", "", nil)
 	if err != nil {
@@ -612,7 +644,7 @@ func HandleResizeChannel(rpc *RPCRequest, ledger *Ledger, signer *Signer) (*RPCR
 	response := ResizeChannelResponse{
 		ChannelID: channel.ChannelID,
 		Intent:    uint8(nitrolite.IntentRESIZE),
-		Version:   big.NewInt(int64(channel.Version) + 1),
+		Version:   channel.Version + 1,
 		StateData: hexutil.Encode(encodedIntentions),
 		StateHash: stateHash,
 		Signature: Signature{
@@ -630,18 +662,18 @@ func HandleResizeChannel(rpc *RPCRequest, ledger *Ledger, signer *Signer) (*RPCR
 		})
 	}
 
-	rpcResponse := CreateResponse(rpc.Req.RequestID, rpc.Req.Method, []any{response}, time.Now())
+	rpcResponse := CreateResponse(rpc.Data.RequestID, rpc.Data.Method, []any{response}, time.Now())
 	return rpcResponse, nil
 }
 
 // HandleCloseChannel processes a request to close a payment channel
-func HandleCloseChannel(rpc *RPCRequest, ledger *Ledger, signer *Signer) (*RPCResponse, error) {
-	if len(rpc.Req.Params) < 1 {
+func HandleCloseChannel(rpc *RPCMessage, db *gorm.DB, signer *Signer) (*RPCMessage, error) {
+	if len(rpc.Data.Params) < 1 {
 		return nil, errors.New("missing parameters")
 	}
 
 	var params CloseChannelParams
-	paramsJSON, err := json.Marshal(rpc.Req.Params[0])
+	paramsJSON, err := json.Marshal(rpc.Data.Params[0])
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse parameters: %w", err)
 	}
@@ -650,45 +682,56 @@ func HandleCloseChannel(rpc *RPCRequest, ledger *Ledger, signer *Signer) (*RPCRe
 		return nil, fmt.Errorf("invalid parameters format: %w", err)
 	}
 
-	channel, err := GetChannelByID(ledger.db, params.ChannelID)
+	channel, err := GetChannelByID(db, params.ChannelID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to find channel: %w", err)
 	}
 
-	reqBytes, err := json.Marshal(rpc.Req)
+	reqBytes, err := json.Marshal(rpc.Data)
 	if err != nil {
 		return nil, errors.New("error serializing message")
 	}
 
-	isValid, err := ValidateSignature(reqBytes, rpc.Sig[0], channel.ParticipantA)
+	isValid, err := ValidateSignature(reqBytes, rpc.Sig[0], channel.Participant)
 	if err != nil || !isValid {
 		return nil, errors.New("invalid signature")
 	}
 
-	account := ledger.SelectBeneficiaryAccount(channel.ChannelID, channel.ParticipantA)
-	balance, err := account.Balance()
+	asset, err := GetAssetBySymbol(db, channel.Token, channel.ChainID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to find asset: %w", err)
+	}
+	if asset == nil {
+		return nil, fmt.Errorf("asset not found: %s", channel.Token)
+	}
+
+	ledger := GetParticipantLedger(db, channel.Participant)
+	balance, err := ledger.Balance(channel.ChannelID, asset.Symbol)
 	if err != nil {
 		return nil, fmt.Errorf("failed to check participant A balance: %w", err)
 	}
 
-	if channel.Amount-balance < 0 {
-		return nil, errors.New("resize this channel first")
+	if balance.IsNegative() {
+		return nil, errors.New("insufficient funds for participant: " + channel.Token)
 	}
 
-	if balance < 0 {
-		return nil, errors.New("insufficient funds for participant: " + channel.Token)
+	rawBalance := balance.Shift(int32(asset.Decimals)).BigInt()
+
+	channelAmount := new(big.Int).SetUint64(channel.Amount)
+	if channelAmount.Cmp(rawBalance) < 0 {
+		return nil, errors.New("resize this channel first")
 	}
 
 	allocations := []nitrolite.Allocation{
 		{
 			Destination: common.HexToAddress(params.FundsDestination),
 			Token:       common.HexToAddress(channel.Token),
-			Amount:      big.NewInt(balance),
+			Amount:      rawBalance,
 		},
 		{
-			Destination: common.HexToAddress(channel.ParticipantB),
+			Destination: signer.GetAddress(),
 			Token:       common.HexToAddress(channel.Token),
-			Amount:      big.NewInt(channel.Amount - balance), // Broker receives the remaining amount
+			Amount:      new(big.Int).Sub(channelAmount, rawBalance), // Broker receives the remaining amount
 		},
 	}
 
@@ -713,7 +756,7 @@ func HandleCloseChannel(rpc *RPCRequest, ledger *Ledger, signer *Signer) (*RPCRe
 	response := CloseChannelResponse{
 		ChannelID: channel.ChannelID,
 		Intent:    uint8(nitrolite.IntentFINALIZE),
-		Version:   big.NewInt(int64(channel.Version) + 1),
+		Version:   channel.Version + 1,
 		StateData: stateDataStr,
 		StateHash: stateHash,
 		Signature: Signature{
@@ -731,17 +774,17 @@ func HandleCloseChannel(rpc *RPCRequest, ledger *Ledger, signer *Signer) (*RPCRe
 		})
 	}
 
-	rpcResponse := CreateResponse(rpc.Req.RequestID, rpc.Req.Method, []any{response}, time.Now())
+	rpcResponse := CreateResponse(rpc.Data.RequestID, rpc.Data.Method, []any{response}, time.Now())
 	return rpcResponse, nil
 }
 
 // HandleGetChannels returns a list of channels for a given account
 // TODO: add filters, pagination, etc.
-func HandleGetChannels(rpc *RPCRequest, ledger *Ledger) (*RPCResponse, error) {
+func HandleGetChannels(rpc *RPCMessage, db *gorm.DB) (*RPCMessage, error) {
 	var participant string
 
-	if len(rpc.Req.Params) > 0 {
-		paramsJSON, err := json.Marshal(rpc.Req.Params[0])
+	if len(rpc.Data.Params) > 0 {
+		paramsJSON, err := json.Marshal(rpc.Data.Params[0])
 		if err == nil {
 			var params map[string]string
 			if err := json.Unmarshal(paramsJSON, &params); err == nil {
@@ -754,7 +797,7 @@ func HandleGetChannels(rpc *RPCRequest, ledger *Ledger) (*RPCResponse, error) {
 		return nil, errors.New("missing participant parameter")
 	}
 
-	reqBytes, err := json.Marshal(rpc.Req)
+	reqBytes, err := json.Marshal(rpc.Data)
 	if err != nil {
 		return nil, errors.New("error serializing message")
 	}
@@ -766,7 +809,7 @@ func HandleGetChannels(rpc *RPCRequest, ledger *Ledger) (*RPCResponse, error) {
 
 	var channelResponses []ChannelResponse
 
-	err = ledger.db.Transaction(func(tx *gorm.DB) error {
+	err = db.Transaction(func(tx *gorm.DB) error {
 		channels, err := getChannelsForParticipant(tx, participant)
 		if err != nil {
 			return fmt.Errorf("failed to get channels: %w", err)
@@ -775,11 +818,15 @@ func HandleGetChannels(rpc *RPCRequest, ledger *Ledger) (*RPCResponse, error) {
 		for _, channel := range channels {
 			channelResponses = append(channelResponses, ChannelResponse{
 				ChannelID:   channel.ChannelID,
-				Participant: channel.ParticipantA,
+				Participant: channel.Participant,
 				Status:      channel.Status,
 				Token:       channel.Token,
-				Amount:      channel.Amount,
-				NetworkID:   channel.NetworkID,
+				Amount:      big.NewInt(int64(channel.Amount)),
+				ChainID:     channel.ChainID,
+				Adjudicator: channel.Adjudicator,
+				Challenge:   channel.Challenge,
+				Nonce:       channel.Nonce,
+				Version:     channel.Version,
 				CreatedAt:   channel.CreatedAt.Format(time.RFC3339),
 				UpdatedAt:   channel.UpdatedAt.Format(time.RFC3339),
 			})
@@ -792,7 +839,7 @@ func HandleGetChannels(rpc *RPCRequest, ledger *Ledger) (*RPCResponse, error) {
 		return nil, err
 	}
 
-	rpcResponse := CreateResponse(rpc.Req.RequestID, rpc.Req.Method, []any{channelResponses}, time.Now())
+	rpcResponse := CreateResponse(rpc.Data.RequestID, rpc.Data.Method, []any{channelResponses}, time.Now())
 	return rpcResponse, nil
 }
 

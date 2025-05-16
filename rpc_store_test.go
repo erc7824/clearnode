@@ -64,7 +64,7 @@ func TestRPCStoreStoreMessage(t *testing.T) {
 	var record RPCRecord
 	err = db.First(&record).Error
 	require.NoError(t, err)
-	
+
 	assert.Equal(t, sender, record.Sender)
 	assert.Equal(t, reqID, record.ReqID)
 	assert.Equal(t, method, record.Method)
@@ -79,7 +79,7 @@ func TestRPCStoreStoreMessage(t *testing.T) {
 	err = json.Unmarshal(record.Params, &storedParamsArray)
 	require.NoError(t, err)
 	require.Len(t, storedParamsArray, 1)
-	
+
 	// Extract the first element which is our original map
 	storedParams := storedParamsArray[0]
 	assert.Equal(t, "value1", storedParams["key1"])
@@ -97,7 +97,7 @@ func TestRPCStoreGetMessages(t *testing.T) {
 
 	// Create test data - 10 messages with different timestamps
 	baseTime := time.Now().Unix()
-	
+
 	for i := 0; i < 10; i++ {
 		record := &RPCRecord{
 			Sender:    "0xSender" + string(rune('A'+i)),
@@ -117,7 +117,7 @@ func TestRPCStoreGetMessages(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, int64(10), total)
 	assert.Len(t, messages, 3)
-	
+
 	// Most recent should be first due to timestamp DESC order
 	assert.Equal(t, uint64(1000), messages[0].ReqID)
 	assert.Equal(t, uint64(1001), messages[1].ReqID)
@@ -151,14 +151,14 @@ func TestRPCStoreGetMessagesError(t *testing.T) {
 	// Setup test database
 	db, cleanup := setupTestDB(t)
 	defer cleanup()
-	
+
 	// Create store
 	store := NewRPCStore(db)
-	
+
 	// Corrupt the schema by dropping the table
 	err := db.Exec("DROP TABLE rpc_store").Error
 	require.NoError(t, err)
-	
+
 	// Now try to get messages from the non-existent table
 	messages, total, err := store.GetMessages(10, 0)
 	assert.Error(t, err)
@@ -177,7 +177,7 @@ func TestRPCStoreGetMessageByID(t *testing.T) {
 
 	// Create test data - several messages with different request IDs
 	reqIDs := []uint64{1001, 1002, 1003}
-	
+
 	for i, reqID := range reqIDs {
 		record := &RPCRecord{
 			Sender:    "0xSender" + string(rune('A'+i)),
