@@ -213,7 +213,7 @@ func (h *UnifiedWSHandler) HandleConnection(w http.ResponseWriter, r *http.Reque
 			}
 
 		case "get_ledger_balances":
-			rpcResponse, handlerErr = HandleGetLedgerBalances(&rpcRequest, h.db)
+			rpcResponse, handlerErr = HandleGetLedgerBalances(&rpcRequest, address, h.db)
 			if handlerErr != nil {
 				log.Printf("Error handling get_ledger_balances: %v", handlerErr)
 				h.sendErrorResponse(address, &rpcRequest.Req, rpcRequest.Sig, conn, "Failed to get ledger balances: "+handlerErr.Error())

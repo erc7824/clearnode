@@ -3,7 +3,6 @@ package main
 import (
 	"time"
 
-	"github.com/ethereum/go-ethereum/common"
 	"github.com/shopspring/decimal"
 	"gorm.io/gorm"
 )
@@ -54,7 +53,7 @@ func (l *ParticipantLedger) Record(accountID string, assetSymbol string, amount 
 	return l.db.Create(entry).Error
 }
 
-func (l *ParticipantLedger) Balance(accountID common.Hash, assetSymbol string) (decimal.Decimal, error) {
+func (l *ParticipantLedger) Balance(accountID string, assetSymbol string) (decimal.Decimal, error) {
 	type result struct {
 		Balance decimal.Decimal `gorm:"column:balance"`
 	}

@@ -12,6 +12,7 @@ import (
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/google/uuid"
+	"github.com/shopspring/decimal"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/testcontainers/testcontainers-go"
@@ -198,9 +199,21 @@ func TestHandleCloseVirtualApp(t *testing.T) {
 	accountB := ledger.SelectBeneficiaryAccount(vAppID, participantB)
 	require.NoError(t, accountB.Record(300))
 
+	assetSymbol := "usdc"
 	closeParams := CloseAppSessionParams{
 		AppSessionID: vAppID,
-		Allocations:  []int64{250, 250},
+		Allocations: []AppAllocation{
+			{
+				Participant: participantA,
+				AssetSymbol: assetSymbol,
+				Amount:      decimal.NewFromInt(250),
+			},
+			{
+				Participant: participantB,
+				AssetSymbol: assetSymbol,
+				Amount:      decimal.NewFromInt(250),
+			},
+		},
 	}
 
 	// Create RPC request
@@ -327,10 +340,22 @@ func TestHandleCreateVirtualApp(t *testing.T) {
 		Nonce:        timestamp, // Set nonce to match what the handler sets
 	}
 
+	assetSymbol := "usdc"
 	// Create the RPC request with the combined application parameters
 	createParams := CreateAppSessionParams{
-		Definition:  appDefinition,
-		Allocations: []int64{100, 200}, // Combined allocations
+		Definition: appDefinition,
+		Allocations: []AppAllocation{
+			{
+				Participant: addrA,
+				AssetSymbol: assetSymbol,
+				Amount:      decimal.NewFromInt(100),
+			},
+			{
+				Participant: addrB,
+				AssetSymbol: assetSymbol,
+				Amount:      decimal.NewFromInt(200),
+			},
+		},
 	}
 
 	rpcReq := &RPCRequest{
@@ -469,7 +494,7 @@ func TestHandleListParticipants(t *testing.T) {
 	}
 
 	// Use the test-specific handler instead of the actual one
-	response, err := HandleGetLedgerBalances(rpcRequest, ledger)
+	response, err := HandleGetLedgerBalances(rpcRequest, "0xParticipant1", db)
 	require.NoError(t, err)
 	assert.NotNil(t, response)
 
@@ -644,7 +669,7 @@ func TestHandleGetChannels(t *testing.T) {
 	for _, ch := range channelsSlice {
 		assert.Equal(t, participantAddr, ch.Participant, "ParticipantA should match")
 		assert.Equal(t, tokenAddress, ch.Token, "Token should match")
-		assert.Equal(t, chainID, ch.NetworkID, "NetworkID should match")
+		assert.Equal(t, chainID, ch.ChainID, "NetworkID should match")
 
 		// Find the corresponding original channel to compare with
 		var originalChannel Channel

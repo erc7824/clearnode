@@ -138,7 +138,7 @@ type ChannelResponse struct {
 	Token       string        `json:"token"`
 	// Total amount in the channel (user + broker)
 	Amount    uint64 `json:"amount"`
-	NetworkID string `json:"network_id"`
+	ChainID   uint32 `json:"network_id"`
 	CreatedAt string `json:"created_at"`
 	UpdatedAt string `json:"updated_at"`
 }
@@ -183,7 +183,7 @@ func HandlePing(rpc *RPCRequest) (*RPCResponse, error) {
 }
 
 // HandleGetLedgerBalances returns a list of participants and their balances for a ledger account
-func HandleGetLedgerBalances(rpc *RPCRequest, db *gorm.DB) (*RPCResponse, error) {
+func HandleGetLedgerBalances(rpc *RPCRequest, address string, db *gorm.DB) (*RPCResponse, error) {
 	var accountID string
 
 	if len(rpc.Req.Params) > 0 {
@@ -196,7 +196,8 @@ func HandleGetLedgerBalances(rpc *RPCRequest, db *gorm.DB) (*RPCResponse, error)
 		}
 	}
 
-	balances, err := GetAccountBalances(ledger.db, accountID)
+	ledger := GetParticipantLedger(db, address)
+	balances, err := ledger.GetBalances(accountID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to find account: %w", err)
 	}
@@ -270,8 +271,6 @@ func HandleCreateApplication(rpc *RPCRequest, db *gorm.DB) (*RPCResponse, error)
 
 	// Use a transaction to ensure atomicity for the entire operation
 	err = db.Transaction(func(tx *gorm.DB) error {
-		ledgerTx := &ParticipantLedger{db: tx}
-
 		for i, participant := range createApp.Definition.Participants {
 			participantChannel, err := getChannelForParticipant(tx, participant)
 			if err != nil {
@@ -279,10 +278,6 @@ func HandleCreateApplication(rpc *RPCRequest, db *gorm.DB) (*RPCResponse, error)
 			}
 
 			allocation := big.NewInt(createApp.Allocations[i])
-
-			if allocation.Cmp(big.NewInt(rpc.Intent[i])) != 0 {
-				return errors.New("intent must match allocation")
-			}
 
 			if allocation.Sign() < 0 {
 				return errors.New("invalid allocation")
@@ -294,6 +289,9 @@ func HandleCreateApplication(rpc *RPCRequest, db *gorm.DB) (*RPCResponse, error)
 				}
 			}
 
+			participantLedger := GetParticipantLedger(tx, participant)
+			//participantLedger.Balance()
+
 			account := ledgerTx.SelectBeneficiaryAccount(participantChannel.ChannelID, participant)
 			balance, err := account.Balance()
 			if err != nil {
@@ -303,7 +301,7 @@ func HandleCreateApplication(rpc *RPCRequest, db *gorm.DB) (*RPCResponse, error)
 				return errors.New("insufficient funds")
 			}
 
-			toAccount := ledgerTx.SelectBeneficiaryAccount(vAppID.Hex(), participant)
+			toAccount := ledgerTx.SelectBeneficiaryAccount(appSessionID.Hex(), participant)
 			if err := account.Transfer(toAccount, allocation.Int64()); err != nil {
 				return fmt.Errorf("failed to transfer funds from participant: %w", err)
 			}
@@ -315,22 +313,19 @@ func HandleCreateApplication(rpc *RPCRequest, db *gorm.DB) (*RPCResponse, error)
 		}
 
 		// Record the virtual app creation in state
-		vAppDB := &VApp{
+		appSession := &AppSession{
 			Protocol:     createApp.Definition.Protocol,
-			AppID:        appSessionID.Hex(),
+			SessionID:    appSessionID.Hex(),
 			Participants: createApp.Definition.Participants,
 			Status:       ChannelStatusOpen,
 			Challenge:    createApp.Definition.Challenge,
 			Weights:      weights,
-			Token:        createApp.Token,
 			Quorum:       createApp.Definition.Quorum,
 			Nonce:        createApp.Definition.Nonce,
 			Version:      rpc.Req.Timestamp,
-			CreatedAt:    time.Now(),
-			UpdatedAt:    time.Now(),
 		}
 
-		if err := tx.Create(vAppDB).Error; err != nil {
+		if err := tx.Create(appSession).Error; err != nil {
 			return fmt.Errorf("failed to record virtual app: %w", err)
 		}
 
@@ -386,15 +381,15 @@ func HandleCloseApplication(rpc *RPCRequest, db *gorm.DB) (*RPCResponse, error) 
 		ledgerTx := &ParticipantLedger{db: tx}
 
 		// Fetch and validate the virtual app
-		var vApp VApp
-		if err := tx.Where("app_id = ? AND status = ?", params.AppID, ChannelStatusOpen).Order("nonce DESC").
-			First(&vApp).Error; err != nil {
+		var appSession AppSession
+		if err := tx.Where("session_id = ? AND status = ?", params.AppSessionID, ChannelStatusOpen).Order("nonce DESC").
+			First(&appSession).Error; err != nil {
 			return fmt.Errorf("virtual app not found or not open: %w", err)
 		}
 
-		participantWeights := make(map[string]int64, len(vApp.Participants))
-		for i, addr := range vApp.Participants {
-			participantWeights[strings.ToLower(addr)] = vApp.Weights[i]
+		participantWeights := make(map[string]int64, len(appSession.Participants))
+		for i, addr := range appSession.Participants {
+			participantWeights[strings.ToLower(addr)] = appSession.Weights[i]
 		}
 
 		var totalWeight int64
@@ -408,22 +403,22 @@ func HandleCloseApplication(rpc *RPCRequest, db *gorm.DB) (*RPCResponse, error) 
 			}
 		}
 
-		if totalWeight < int64(vApp.Quorum) {
-			return fmt.Errorf("quorum not met: %d/%d", totalWeight, vApp.Quorum)
+		if totalWeight < int64(appSession.Quorum) {
+			return fmt.Errorf("quorum not met: %d/%d", totalWeight, appSession.Quorum)
 		}
 
-		fmt.Println("Quorum met:", totalWeight, "of", vApp.Quorum)
+		fmt.Println("Quorum met:", totalWeight, "of", appSession.Quorum)
 
 		// Process allocations
 		totalVirtualAppBalance, sumAllocations := int64(0), int64(0)
-		for i, participant := range vApp.Participants {
+		for i, participant := range appSession.Participants {
 			allocation := params.FinalAllocations[i]
 			if allocation < 0 {
 				return errors.New("invalid allocation")
 			}
 
 			// Adjust balances
-			virtualBalance := ledgerTx.SelectBeneficiaryAccount(vApp.AppID, participant)
+			virtualBalance := ledgerTx.SelectBeneficiaryAccount(appSession.AppID, participant)
 			participantBalance, err := virtualBalance.Balance()
 			if err != nil {
 				return fmt.Errorf("failed to check balance for %s: %w", participant, err)
@@ -451,7 +446,7 @@ func HandleCloseApplication(rpc *RPCRequest, db *gorm.DB) (*RPCResponse, error) 
 		}
 
 		// Close the virtual app
-		return tx.Model(&vApp).Updates(map[string]any{
+		return tx.Model(&appSession).Updates(map[string]any{
 			"status":     ChannelStatusClosed,
 			"updated_at": time.Now(),
 		}).Error
@@ -488,8 +483,8 @@ func HandleGetAppDefinition(rpc *RPCRequest, db *gorm.DB) (*RPCResponse, error) 
 		return nil, errors.New("missing account ID")
 	}
 
-	var vApp VApp
-	if err := ledger.db.Where("app_id = ?", accountID).First(&vApp).Error; err != nil {
+	var vApp AppSession
+	if err := db.Where("session_id = ?", accountID).First(&vApp).Error; err != nil {
 		return nil, fmt.Errorf("failed to find application: %w", err)
 	}
 
@@ -552,13 +547,21 @@ func HandleResizeChannel(rpc *RPCRequest, db *gorm.DB, signer *Signer) (*RPCResp
 		return nil, errors.New("invalid signature")
 	}
 
-	// Get current account balance
-	account := ledger.SelectBeneficiaryAccount(channel.ChannelID, channel.ParticipantA)
-	balance, err := account.Balance()
+	asset, err := GetAssetBySymbol(db, channel.Token, channel.ChainID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to find asset: %w", err)
+	}
+	if asset == nil {
+		return nil, fmt.Errorf("asset not found: %s", channel.Token)
+	}
+
+	ledger := GetParticipantLedger(db, channel.ParticipantA)
+	balance, err := ledger.Balance(channel.ChannelID, asset.Symbol)
 	if err != nil {
 		return nil, fmt.Errorf("failed to check participant A balance: %w", err)
 	}
 
+	// TODO: turn balance into pips
 	brokerPart := channel.Amount - balance
 
 	// Calculate the new channel amount
@@ -666,12 +669,21 @@ func HandleCloseChannel(rpc *RPCRequest, db *gorm.DB, signer *Signer) (*RPCRespo
 		return nil, errors.New("invalid signature")
 	}
 
-	account := ledger.SelectBeneficiaryAccount(channel.ChannelID, channel.ParticipantA)
-	balance, err := account.Balance()
+	asset, err := GetAssetBySymbol(db, channel.Token, channel.ChainID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to find asset: %w", err)
+	}
+	if asset == nil {
+		return nil, fmt.Errorf("asset not found: %s", channel.Token)
+	}
+
+	ledger := GetParticipantLedger(db, channel.ParticipantA)
+	balance, err := ledger.Balance(channel.ChannelID, asset.Symbol)
 	if err != nil {
 		return nil, fmt.Errorf("failed to check participant A balance: %w", err)
 	}
 
+	// TODO: turn balance into pips
 	if channel.Amount-balance < 0 {
 		return nil, errors.New("resize this channel first")
 	}
@@ -780,7 +792,7 @@ func HandleGetChannels(rpc *RPCRequest, db *gorm.DB) (*RPCResponse, error) {
 				Status:      channel.Status,
 				Token:       channel.Token,
 				Amount:      channel.Amount,
-				NetworkID:   channel.ChainID,
+				ChainID:     channel.ChainID,
 				CreatedAt:   channel.CreatedAt.Format(time.RFC3339),
 				UpdatedAt:   channel.UpdatedAt.Format(time.RFC3339),
 			})
