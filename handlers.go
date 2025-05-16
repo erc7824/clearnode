@@ -79,7 +79,7 @@ type AppSessionResponse struct {
 // ResizeChannelParams represents parameters needed for resizing a channel
 type ResizeChannelParams struct {
 	ChannelID        string          `json:"channel_id"`
-	NewAmount        decimal.Decimal `json:"new_channel_amount"`
+	NewAmount        decimal.Decimal `json:"new_amount"`
 	FundsDestination string          `json:"funds_destination"`
 }
 
@@ -88,7 +88,7 @@ type ResizeChannelResponse struct {
 	ChannelID   string       `json:"channel_id"`
 	StateData   string       `json:"state_data"`
 	Intent      uint8        `json:"intent"`
-	Version     *big.Int     `json:"version"`
+	Version     uint64       `json:"version"`
 	Allocations []Allocation `json:"allocations"`
 	StateHash   string       `json:"state_hash"`
 	Signature   Signature    `json:"server_signature"`
@@ -123,7 +123,7 @@ type CloseChannelParams struct {
 type CloseChannelResponse struct {
 	ChannelID        string       `json:"channel_id"`
 	Intent           uint8        `json:"intent"`
-	Version          *big.Int     `json:"version"`
+	Version          uint64       `json:"version"`
 	StateData        string       `json:"state_data"`
 	FinalAllocations []Allocation `json:"allocations"`
 	StateHash        string       `json:"state_hash"`
@@ -137,14 +137,14 @@ type ChannelResponse struct {
 	Status      ChannelStatus `json:"status"`
 	Token       string        `json:"token"`
 	// Total amount in the channel (user + broker)
-	Amount      uint64 `json:"amount"`
-	ChainID     uint32 `json:"chain_id"`
-	Adjudicator string `json:"adjudicator"`
-	Challenge   uint64 `json:"challenge"`
-	Nonce       uint64 `json:"nonce"`
-	Version     uint64 `json:"version"`
-	CreatedAt   string `json:"created_at"`
-	UpdatedAt   string `json:"updated_at"`
+	Amount      *big.Int `json:"amount"`
+	ChainID     uint32   `json:"chain_id"`
+	Adjudicator string   `json:"adjudicator"`
+	Challenge   uint64   `json:"challenge"`
+	Nonce       uint64   `json:"nonce"`
+	Version     uint64   `json:"version"`
+	CreatedAt   string   `json:"created_at"`
+	UpdatedAt   string   `json:"updated_at"`
 }
 
 type Signature struct {
@@ -156,14 +156,14 @@ type Signature struct {
 // NetworkInfo represents information about a supported network
 type NetworkInfo struct {
 	Name           string `json:"name"`
-	ChainID        uint32 `json:"chainId"`
-	CustodyAddress string `json:"custodyAddress"`
+	ChainID        uint32 `json:"chain_id"`
+	CustodyAddress string `json:"custody_address"`
 }
 
 // BrokerConfig represents the broker configuration information
 type BrokerConfig struct {
-	BrokerAddress     string        `json:"brokerAddress"`
-	SupportedNetworks []NetworkInfo `json:"supportedNetworks"`
+	BrokerAddress string        `json:"broker_address"`
+	Networks      []NetworkInfo `json:"networks"`
 }
 
 // RPCEntry represents an RPC record from history.
@@ -193,8 +193,8 @@ func HandleGetConfig(rpc *RPCMessage, config *Config, signer *Signer) (*RPCMessa
 	}
 
 	brokerConfig := BrokerConfig{
-		BrokerAddress:     signer.GetAddress().Hex(),
-		SupportedNetworks: supportedNetworks,
+		BrokerAddress: signer.GetAddress().Hex(),
+		Networks:      supportedNetworks,
 	}
 
 	rpcResponse := CreateResponse(rpc.Data.RequestID, "get_config", []any{brokerConfig}, time.Now())
@@ -215,7 +215,7 @@ func HandleGetLedgerBalances(rpc *RPCMessage, address string, db *gorm.DB) (*RPC
 		if err == nil {
 			var params map[string]string
 			if err := json.Unmarshal(paramsJSON, &params); err == nil {
-				accountID = params["acc"]
+				accountID = params["account_id"]
 			}
 		}
 	}
@@ -521,7 +521,7 @@ func HandleGetAppDefinition(rpc *RPCMessage, db *gorm.DB) (*RPCMessage, error) {
 		if err == nil {
 			var params map[string]string
 			if err := json.Unmarshal(paramsJSON, &params); err == nil {
-				sessionID = params["id"]
+				sessionID = params["app_session_id"]
 			}
 		}
 	}
@@ -657,7 +657,7 @@ func HandleResizeChannel(rpc *RPCMessage, db *gorm.DB, signer *Signer) (*RPCMess
 	response := ResizeChannelResponse{
 		ChannelID: channel.ChannelID,
 		Intent:    uint8(nitrolite.IntentRESIZE),
-		Version:   big.NewInt(int64(channel.Version) + 1),
+		Version:   channel.Version + 1,
 		StateData: hexutil.Encode(encodedIntentions),
 		StateHash: stateHash,
 		Signature: Signature{
@@ -769,7 +769,7 @@ func HandleCloseChannel(rpc *RPCMessage, db *gorm.DB, signer *Signer) (*RPCMessa
 	response := CloseChannelResponse{
 		ChannelID: channel.ChannelID,
 		Intent:    uint8(nitrolite.IntentFINALIZE),
-		Version:   big.NewInt(int64(channel.Version) + 1),
+		Version:   channel.Version + 1,
 		StateData: stateDataStr,
 		StateHash: stateHash,
 		Signature: Signature{
@@ -834,7 +834,7 @@ func HandleGetChannels(rpc *RPCMessage, db *gorm.DB) (*RPCMessage, error) {
 				Participant: channel.Participant,
 				Status:      channel.Status,
 				Token:       channel.Token,
-				Amount:      channel.Amount,
+				Amount:      big.NewInt(int64(channel.Amount)),
 				ChainID:     channel.ChainID,
 				Adjudicator: channel.Adjudicator,
 				Challenge:   channel.Challenge,
