@@ -79,43 +79,37 @@ The Clearnode protocol is a system for managing payment channels and virtual app
 
 All messages exchanged between clients and clearnodes follow this standardized format:
 
-### Request Message
+### Request Message Structure
 
 ```json
 {
   "req": [REQUEST_ID, METHOD, [PARAMETERS], TIMESTAMP],
-  "acc": "ACCOUNT_ID", // AppId for Virtual Ledgers for Internal Communication
-  "int": [INTENT], // Optional allocation intent change
   "sig": ["SIGNATURE"]  // Client's signature of the entire "req" object
 }
 ```
 
-- The `acc` field serves as both the subject and destination pubsub topic for the message. There is a one-to-one mapping between topics and ledger accounts.
-- The `int` field can be omitted if there is no allocation change in this request.
-- The `sig` field contains the rpcHash signature, ensuring proof-of-history integrity.
+- The `sig` field contains one or more signatures, ensuring proof-of-history integrity.
 
-### Response Message
+### Response Message Structure
 
 ```json
 {
   "res": [REQUEST_ID, METHOD, [RESPONSE_DATA], TIMESTAMP],
-  "acc": "ACCOUNT_ID", // AppId for Virtual Ledgers for Internal Communication
-  "int": [INTENT],// Allocation intent change
   "sig": ["SIGNATURE"]
 }
 ```
 
 The structure breakdown:
 
-- `REQUEST_ID`: A unique identifier for the request (uint64)
-- `METHOD`: The name of the method being called (string)
-- `PARAMETERS`/`RESPONSE_DATA`: An array of parameters/response data (array)
-- `TIMESTAMP`: Unix timestamp of the request/response (uint64)
-- `ACCOUNT_ID` (`acc`): Ledger account identifier that serves as the destination pubsub topic for the message
-- `INTENT` (`int`): Optional allocation intent change for token distributions between participants
-- `SIGNATURE`: Cryptographic signature of the message.
+- `REQUEST_ID`: A unique identifier for the request (`uint64`)
+- `METHOD`: The name of the method being called (`string`)
+- `PARAMETERS`/`RESPONSE_DATA`: An array of parameters/response data (`[]any`)
+- `TIMESTAMP`: Unix timestamp of the request/response (`uint64`)
+- `SIGNATURE`: Cryptographic signatures of the message (`[]string`). Multiple signatures may be required for certain operations.
 
-## App Definition
+## Data Types
+
+### App Definition
 
 ```json
 {
@@ -131,20 +125,6 @@ The structure breakdown:
 }
 ```
 
-### Intent Format
-
-Intent specifies token distributions for a ledger allocation change.
-Values are arranged in the same order as the participants array.
-
-#### Example
-
-```json
-[-10, +10]
-```
-
-When creating a new app, the first Intent represents the initial allocation.
-The token type is defined by the funding account source (which is a ledger channel).
-Each channel supports only one currency type.
 
 ## Authentication Flow
 

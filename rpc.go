@@ -9,16 +9,14 @@ import (
 
 // RPCRequest represents a complete message in the RPC protocol, including request data and signatures
 type RPCRequest struct {
-	Req       RPCData  `json:"req"`
-	AccountID string   `json:"acc,omitempty"` // If specified, message is sent into the virtual app.
-	Sig       []string `json:"sig"`
+	Req RPCData  `json:"req"`
+	Sig []string `json:"sig"`
 }
 
 // RPCResponse represents a response in the RPC protocol
 type RPCResponse struct {
-	Res       RPCData  `json:"res"`
-	AccountID string   `json:"acc,omitempty"` // If specified, message is sent into the virtual app.
-	Sig       []string `json:"sig"`
+	Res RPCData  `json:"res"`
+	Sig []string `json:"sig"`
 }
 
 // RPCData represents the common structure for both requests and responses

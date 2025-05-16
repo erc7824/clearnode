@@ -169,26 +169,7 @@ func (h *UnifiedWSHandler) HandleConnection(w http.ResponseWriter, r *http.Reque
 		// Forward request or response for internal vApp communication.
 		var rpcRequest RPCRequest
 		if err := json.Unmarshal(messageBytes, &rpcRequest); err != nil {
-			var rpcRes RPCResponse
-			if err := json.Unmarshal(messageBytes, &rpcRes); err == nil && rpcRes.AccountID != "" {
-				if err := forwardMessage(rpcRes.AccountID, rpcRes.Res, rpcRes.Sig, messageBytes, address, h); err != nil {
-					log.Printf("Error forwarding message: %v", err)
-					h.sendErrorResponse(address, nil, nil, conn, "Failed to forward message: "+err.Error())
-					continue
-				}
-				continue
-			}
-
 			h.sendErrorResponse(address, nil, nil, conn, "Invalid message format")
-			continue
-		}
-
-		if rpcRequest.AccountID != "" {
-			if err := forwardMessage(rpcRequest.AccountID, rpcRequest.Req, rpcRequest.Sig, messageBytes, address, h); err != nil {
-				log.Printf("Error forwarding message: %v", err)
-				h.sendErrorResponse(address, nil, nil, conn, "Failed to forward message: "+err.Error())
-				continue
-			}
 			continue
 		}
 

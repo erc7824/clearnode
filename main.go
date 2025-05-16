@@ -12,8 +12,6 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
-//var BrokerAddress string
-
 func main() {
 	config, err := LoadConfig()
 	if err != nil {
