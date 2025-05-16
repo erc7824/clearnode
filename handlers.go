@@ -78,9 +78,9 @@ type AppSessionResponse struct {
 
 // ResizeChannelParams represents parameters needed for resizing a channel
 type ResizeChannelParams struct {
-	ChannelID         string   `json:"channel_id"`
-	ParticipantChange *big.Int `json:"participant_change"` // how much user wants to deposit or withdraw.
-	FundsDestination  string   `json:"funds_destination"`
+	ChannelID         string          `json:"channel_id"`
+	ParticipantChange decimal.Decimal `json:"participant_change"` // how much user wants to deposit or withdraw.
+	FundsDestination  string          `json:"funds_destination"`
 }
 
 // ResizeChannelResponse represents the response for resizing a channel
@@ -550,10 +550,6 @@ func HandleResizeChannel(rpc *RPCRequest, db *gorm.DB, signer *Signer) (*RPCResp
 		return nil, fmt.Errorf("invalid parameters format: %w", err)
 	}
 
-	if params.ParticipantChange == nil {
-		return nil, errors.New("missing participant change amount")
-	}
-
 	channel, err := GetChannelByID(db, params.ChannelID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to find channel: %w", err)
@@ -590,29 +586,27 @@ func HandleResizeChannel(rpc *RPCRequest, db *gorm.DB, signer *Signer) (*RPCResp
 		return nil, fmt.Errorf("failed to check participant A balance: %w", err)
 	}
 
-	// TODO: turn balance into pips
-	brokerPart := channel.Amount - balance
-
-	// Calculate the new channel amount
-	newAmount := new(big.Int).Add(big.NewInt(balance), params.ParticipantChange)
-	if newAmount.Sign() < 0 {
-		return nil, errors.New("invalid resize amount")
+	if balance.LessThan(params.ParticipantChange) {
+		return nil, errors.New("insufficient unified balance")
 	}
+
+	rawNewChannelAmount := params.ParticipantChange.Shift(int32(asset.Decimals)).BigInt()
+	brokerPart := channel.Amount - rawNewChannelAmount.Uint64()
 
 	allocations := []nitrolite.Allocation{
 		{
 			Destination: common.HexToAddress(params.FundsDestination),
 			Token:       common.HexToAddress(channel.Token),
-			Amount:      newAmount,
+			Amount:      rawNewChannelAmount,
 		},
 		{
-			Destination: common.HexToAddress(channel.ParticipantB),
+			Destination: common.HexToAddress(BrokerAddress),
 			Token:       common.HexToAddress(channel.Token),
 			Amount:      big.NewInt(0),
 		},
 	}
 
-	resizeAmounts := []*big.Int{params.ParticipantChange, big.NewInt(-brokerPart)} // Always release broker funds if there is a surplus.
+	resizeAmounts := []*big.Int{big.NewInt(0), big.NewInt(-int64(brokerPart))} // Always release broker funds if there is a surplus.
 
 	intentionType, err := abi.NewType("int256[]", "", nil)
 	if err != nil {
@@ -712,25 +706,27 @@ func HandleCloseChannel(rpc *RPCRequest, db *gorm.DB, signer *Signer) (*RPCRespo
 		return nil, fmt.Errorf("failed to check participant A balance: %w", err)
 	}
 
-	// TODO: turn balance into pips
-	if channel.Amount-balance < 0 {
-		return nil, errors.New("resize this channel first")
+	if balance.IsNegative() {
+		return nil, errors.New("insufficient funds for participant: " + channel.Token)
 	}
 
-	if balance < 0 {
-		return nil, errors.New("insufficient funds for participant: " + channel.Token)
+	rawBalance := balance.Shift(int32(asset.Decimals)).BigInt()
+
+	channelAmount := new(big.Int).SetUint64(channel.Amount)
+	if channelAmount.Cmp(rawBalance) < 0 {
+		return nil, errors.New("resize this channel first")
 	}
 
 	allocations := []nitrolite.Allocation{
 		{
 			Destination: common.HexToAddress(params.FundsDestination),
 			Token:       common.HexToAddress(channel.Token),
-			Amount:      big.NewInt(balance),
+			Amount:      rawBalance,
 		},
 		{
-			Destination: common.HexToAddress(channel.ParticipantB),
+			Destination: common.HexToAddress(BrokerAddress),
 			Token:       common.HexToAddress(channel.Token),
-			Amount:      big.NewInt(channel.Amount - balance), // Broker receives the remaining amount
+			Amount:      new(big.Int).Sub(channelAmount, rawBalance), // Broker receives the remaining amount
 		},
 	}
 

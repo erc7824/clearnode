@@ -215,8 +215,7 @@ func (c *Custody) handleBlockChainEvent(l types.Log) {
 				return fmt.Errorf("Asset not found in database for token: %s", channel.Token)
 			}
 
-			assetDecimals := asset.Decimals
-			tokenAmount := decimal.NewFromBigInt(big.NewInt(int64(channel.Amount)), -int32(assetDecimals))
+			tokenAmount := decimal.NewFromBigInt(big.NewInt(int64(channel.Amount)), -int32(asset.Decimals))
 
 			ledger := GetParticipantLedger(tx, channel.Participant)
 			if err := ledger.Record(channel.Participant, asset.Symbol, tokenAmount); err != nil {
@@ -269,8 +268,7 @@ func (c *Custody) handleBlockChainEvent(l types.Log) {
 				return fmt.Errorf("Asset not found in database for token: %s", channel.Token)
 			}
 
-			assetDecimals := asset.Decimals
-			tokenAmount := decimal.NewFromBigInt(big.NewInt(int64(channel.Amount)), -int32(assetDecimals))
+			tokenAmount := decimal.NewFromBigInt(big.NewInt(int64(channel.Amount)), -int32(asset.Decimals))
 
 			ledger := GetParticipantLedger(tx, channel.Participant)
 			if err := ledger.Record(channel.Participant, asset.Symbol, tokenAmount.Neg()); err != nil {
@@ -304,10 +302,12 @@ func (c *Custody) handleBlockChainEvent(l types.Log) {
 			return
 		}
 
+		newAmount := int64(channel.Amount)
 		for _, change := range ev.DeltaAllocations {
-			channel.Amount += uint64(change.Int64())
+			newAmount += change.Int64()
 		}
 
+		channel.Amount = uint64(newAmount)
 		channel.UpdatedAt = time.Now()
 		channel.Version++
 		if err := c.db.Save(&channel).Error; err != nil {
