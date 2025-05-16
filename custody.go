@@ -127,16 +127,18 @@ func (c *Custody) handleBlockChainEvent(l types.Log) {
 
 		participantA := ev.Channel.Participants[0].Hex()
 		nonce := ev.Channel.Nonce
-		participantB := ev.Channel.Participants[1].Hex()
+		participantB := ev.Channel.Participants[1]
+		tokenAddress := ev.Initial.Allocations[0].Token.Hex()
+		tokenAmount := ev.Initial.Allocations[0].Amount.Int64()
 
 		// Check if channel was created with the broker.
-		if participantB != BrokerAddress {
-			fmt.Printf("participantB [%s] is not Broker[%s]: ", participantB, BrokerAddress)
+		if participantB != c.signer.GetAddress() {
+			fmt.Printf("participantB [%s] is not Broker[%s]: ", participantB, c.signer.GetAddress().Hex())
 			return
 		}
 
 		// Check if there is already existing open channel with the broker
-		existingOpenChannel, err := CheckExistingChannels(c.db, participantA, participantB, c.chainID)
+		existingOpenChannel, err := CheckExistingChannels(c.db, participantA, tokenAddress, c.chainID)
 		if err != nil {
 			log.Printf("[Created] Error checking channels in database: %v", err)
 			return
@@ -146,9 +148,6 @@ func (c *Custody) handleBlockChainEvent(l types.Log) {
 			log.Printf("[Created] An open channel with broker already exists: %s", existingOpenChannel.ChannelID)
 			return
 		}
-
-		tokenAddress := ev.Initial.Allocations[0].Token.Hex()
-		tokenAmount := ev.Initial.Allocations[0].Amount.Int64()
 
 		channelID := common.BytesToHash(ev.ChannelId[:]).Hex()
 		err = CreateChannel(
@@ -327,8 +326,7 @@ func (c *Custody) UpdateBalanceMetrics(ctx context.Context, tokens []common.Addr
 		return
 	}
 
-	brokerAddr := common.HexToAddress(BrokerAddress)
-
+	brokerAddr := c.signer.GetAddress()
 	for _, token := range tokens {
 		// Create a call opts with the provided context
 		callOpts := &bind.CallOpts{

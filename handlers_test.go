@@ -35,7 +35,7 @@ func setupTestSqlite(t testing.TB) *gorm.DB {
 	require.NoError(t, err)
 
 	// Auto migrate all required models
-	err = db.AutoMigrate(&Entry{}, &Channel{}, &AppSession{}, &RPCRecord{})
+	err = db.AutoMigrate(&Entry{}, &Channel{}, &AppSession{}, &RPCRecord{}, &Asset{})
 	require.NoError(t, err)
 
 	return db
@@ -76,7 +76,7 @@ func setupTestPostgres(ctx context.Context, t testing.TB) (*gorm.DB, testcontain
 	require.NoError(t, err)
 
 	// Auto migrate all required models
-	err = db.AutoMigrate(&Entry{}, &Channel{}, &AppSession{}, &RPCRecord{})
+	err = db.AutoMigrate(&Entry{}, &Channel{}, &AppSession{}, &RPCRecord{}, &Asset{})
 	require.NoError(t, err)
 
 	return db, postgresContainer
@@ -384,6 +384,30 @@ func TestHandleListParticipants(t *testing.T) {
 
 // TestHandleGetConfig tests the get config handler functionality
 func TestHandleGetConfig(t *testing.T) {
+	// Create a mock config with supported networks
+	mockConfig := &Config{
+		networks: map[string]*NetworkConfig{
+			"polygon": {
+				Name:           "polygon",
+				ChainID:        137,
+				InfuraURL:      "https://polygon-mainnet.infura.io/v3/test",
+				CustodyAddress: "0xCustodyAddress1",
+			},
+			"celo": {
+				Name:           "celo",
+				ChainID:        42220,
+				InfuraURL:      "https://celo-mainnet.infura.io/v3/test",
+				CustodyAddress: "0xCustodyAddress2",
+			},
+			"base": {
+				Name:           "base",
+				ChainID:        8453,
+				InfuraURL:      "https://base-mainnet.infura.io/v3/test",
+				CustodyAddress: "0xCustodyAddress3",
+			},
+		},
+	}
+
 	rpcRequest := &RPCRequest{
 		Req: RPCData{
 			RequestID: 1,
@@ -394,7 +418,12 @@ func TestHandleGetConfig(t *testing.T) {
 		Sig: []string{"dummy-signature"},
 	}
 
-	response, err := HandleGetConfig(rpcRequest)
+	raw, err := crypto.GenerateKey()
+	require.NoError(t, err)
+
+	signer := Signer{privateKey: raw}
+
+	response, err := HandleGetConfig(rpcRequest, mockConfig, &signer)
 	require.NoError(t, err)
 	assert.NotNil(t, response)
 
@@ -407,7 +436,28 @@ func TestHandleGetConfig(t *testing.T) {
 	configMap, ok := responseParams[0].(BrokerConfig)
 	require.True(t, ok, "Response should contain a BrokerConfig")
 
-	assert.Equal(t, BrokerAddress, configMap.BrokerAddress)
+	// Verify broker address
+	assert.Equal(t, signer.GetAddress().Hex(), configMap.BrokerAddress)
+
+	// Verify supported networks
+	require.Len(t, configMap.SupportedNetworks, 3, "Should have 3 supported networks")
+
+	// Map to check all networks are present
+	expectedNetworks := map[string]uint32{
+		"polygon": 137,
+		"celo":    42220,
+		"base":    8453,
+	}
+
+	for _, network := range configMap.SupportedNetworks {
+		expectedChainID, exists := expectedNetworks[network.Name]
+		assert.True(t, exists, "Network %s should be in expected networks", network.Name)
+		assert.Equal(t, expectedChainID, network.ChainID, "Chain ID should match for %s", network.Name)
+		assert.Contains(t, network.CustodyAddress, "0xCustodyAddress", "Custody address should be present")
+		delete(expectedNetworks, network.Name)
+	}
+
+	assert.Empty(t, expectedNetworks, "All expected networks should be found in the response")
 }
 
 // TestHandleGetChannels tests the get channels functionality
@@ -432,6 +482,8 @@ func TestHandleGetChannels(t *testing.T) {
 			ChainID:     chainID,
 			Amount:      1000,
 			Nonce:       1,
+			Version:     10,
+			Challenge:   86400,
 			Adjudicator: "0xAdj1",
 			CreatedAt:   time.Now().Add(-24 * time.Hour), // 1 day ago
 			UpdatedAt:   time.Now(),
@@ -444,6 +496,8 @@ func TestHandleGetChannels(t *testing.T) {
 			ChainID:     chainID,
 			Amount:      2000,
 			Nonce:       2,
+			Version:     20,
+			Challenge:   86400,
 			Adjudicator: "0xAdj2",
 			CreatedAt:   time.Now().Add(-12 * time.Hour), // 12 hours ago
 			UpdatedAt:   time.Now(),
@@ -456,6 +510,8 @@ func TestHandleGetChannels(t *testing.T) {
 			ChainID:     chainID,
 			Amount:      3000,
 			Nonce:       3,
+			Version:     30,
+			Challenge:   86400,
 			Adjudicator: "0xAdj3",
 			CreatedAt:   time.Now().Add(-6 * time.Hour), // 6 hours ago
 			UpdatedAt:   time.Now(),
@@ -474,6 +530,8 @@ func TestHandleGetChannels(t *testing.T) {
 		ChainID:     chainID,
 		Amount:      5000,
 		Nonce:       4,
+		Version:     40,
+		Challenge:   86400,
 		Adjudicator: "0xAdj4",
 		CreatedAt:   time.Now(),
 		UpdatedAt:   time.Now(),
@@ -538,6 +596,10 @@ func TestHandleGetChannels(t *testing.T) {
 
 		assert.Equal(t, originalChannel.Status, ch.Status, "Status should match")
 		assert.Equal(t, originalChannel.Amount, ch.Amount, "Amount should match")
+		assert.Equal(t, originalChannel.Nonce, ch.Nonce, "Nonce should match")
+		assert.Equal(t, originalChannel.Version, ch.Version, "Version should match")
+		assert.Equal(t, originalChannel.Challenge, ch.Challenge, "Challenge should match")
+		assert.Equal(t, originalChannel.Adjudicator, ch.Adjudicator, "Adjudicator should match")
 		assert.NotEmpty(t, ch.CreatedAt, "CreatedAt should not be empty")
 		assert.NotEmpty(t, ch.UpdatedAt, "UpdatedAt should not be empty")
 	}

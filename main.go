@@ -12,7 +12,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
-var BrokerAddress string
+//var BrokerAddress string
 
 func main() {
 	config, err := LoadConfig()
@@ -48,7 +48,7 @@ func main() {
 
 	go metrics.RecordMetricsPeriodically(db, custodyClients)
 
-	unifiedWSHandler := NewUnifiedWSHandler(signer, db, metrics, rpcStore)
+	unifiedWSHandler := NewUnifiedWSHandler(signer, db, metrics, rpcStore, config)
 	http.HandleFunc("/ws", unifiedWSHandler.HandleConnection)
 
 	// Set up a separate mux for metrics

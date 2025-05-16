@@ -29,9 +29,8 @@ func NewSigner(privateKeyHex string) (*Signer, error) {
 	}
 
 	publicKey := privateKey.Public().(*ecdsa.PublicKey)
-	BrokerAddress = crypto.PubkeyToAddress(*publicKey).Hex()
 
-	log.Printf("Broker signer initialized with address: %s", BrokerAddress)
+	log.Printf("Broker signer initialized with address: %s", crypto.PubkeyToAddress(*publicKey).Hex())
 
 	return &Signer{privateKey: privateKey}, nil
 }

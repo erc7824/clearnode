@@ -26,6 +26,7 @@ type UnifiedWSHandler struct {
 	authManager   *AuthManager
 	metrics       *Metrics
 	rpcStore      *RPCStore
+	config        *Config
 }
 
 func NewUnifiedWSHandler(
@@ -33,6 +34,7 @@ func NewUnifiedWSHandler(
 	db *gorm.DB,
 	metrics *Metrics,
 	rpcStore *RPCStore,
+	config *Config,
 ) *UnifiedWSHandler {
 	return &UnifiedWSHandler{
 		signer: signer,
@@ -48,6 +50,7 @@ func NewUnifiedWSHandler(
 		authManager: NewAuthManager(),
 		metrics:     metrics,
 		rpcStore:    rpcStore,
+		config:      config,
 	}
 }
 
@@ -205,7 +208,7 @@ func (h *UnifiedWSHandler) HandleConnection(w http.ResponseWriter, r *http.Reque
 			}
 
 		case "get_config":
-			rpcResponse, handlerErr = HandleGetConfig(&rpcRequest)
+			rpcResponse, handlerErr = HandleGetConfig(&rpcRequest, h.config, h.signer)
 			if handlerErr != nil {
 				log.Printf("Error handling get_config: %v", handlerErr)
 				h.sendErrorResponse(address, &rpcRequest.Req, rpcRequest.Sig, conn, "Failed to get config: "+handlerErr.Error())
