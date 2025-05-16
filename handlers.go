@@ -78,9 +78,9 @@ type AppSessionResponse struct {
 
 // ResizeChannelParams represents parameters needed for resizing a channel
 type ResizeChannelParams struct {
-	ChannelID         string          `json:"channel_id"`
-	ParticipantChange decimal.Decimal `json:"participant_change"` // how much user wants to deposit or withdraw.
-	FundsDestination  string          `json:"funds_destination"`
+	ChannelID        string          `json:"channel_id"`
+	NewAmount        decimal.Decimal `json:"new_channel_amount"`
+	FundsDestination string          `json:"funds_destination"`
 }
 
 // ResizeChannelResponse represents the response for resizing a channel
@@ -552,7 +552,7 @@ func HandleResizeChannel(rpc *RPCRequest, db *gorm.DB, signer *Signer) (*RPCResp
 	req := ResizeChannelSignData{
 		RequestID: rpc.Req.RequestID,
 		Method:    rpc.Req.Method,
-		Params:    []ResizeChannelParams{{ChannelID: params.ChannelID, ParticipantChange: params.ParticipantChange, FundsDestination: params.FundsDestination}},
+		Params:    []ResizeChannelParams{{ChannelID: params.ChannelID, NewAmount: params.NewAmount, FundsDestination: params.FundsDestination}},
 		Timestamp: rpc.Req.Timestamp,
 	}
 
@@ -580,11 +580,11 @@ func HandleResizeChannel(rpc *RPCRequest, db *gorm.DB, signer *Signer) (*RPCResp
 		return nil, fmt.Errorf("failed to check participant A balance: %w", err)
 	}
 
-	if balance.LessThan(params.ParticipantChange) {
+	if balance.LessThan(params.NewAmount) {
 		return nil, errors.New("insufficient unified balance")
 	}
 
-	rawNewChannelAmount := params.ParticipantChange.Shift(int32(asset.Decimals)).BigInt()
+	rawNewChannelAmount := params.NewAmount.Shift(int32(asset.Decimals)).BigInt()
 	brokerPart := channel.Amount - rawNewChannelAmount.Uint64()
 
 	allocations := []nitrolite.Allocation{
