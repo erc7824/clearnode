@@ -7,6 +7,13 @@ import (
 	"time"
 )
 
+type RPCType string
+
+const (
+	RPCTypeRequest  RPCType = "req"
+	RPCTypeResponse RPCType = "res"
+)
+
 // RPCMessage represents a complete message in the RPC protocol, including data and signatures
 type RPCMessage struct {
 	Data RPCData  `json:"data"`
@@ -14,10 +21,10 @@ type RPCMessage struct {
 }
 
 // RPCData represents the common structure for both requests and responses
-// Format: [request_id, type(req/res), method, params, ts]
+// Format: [request_id, type, method, params, ts]
 type RPCData struct {
 	RequestID uint64
-	Type      string
+	Type      RPCType
 	Method    string
 	Params    []any
 	Timestamp uint64
@@ -37,7 +44,7 @@ func CreateResponse(id uint64, method string, responseParams []any, newTimestamp
 	return &RPCMessage{
 		Data: RPCData{
 			RequestID: id,
-			Type:      "res",
+			Type:      RPCTypeResponse,
 			Method:    method,
 			Params:    responseParams,
 			Timestamp: uint64(newTimestamp.Unix()),
