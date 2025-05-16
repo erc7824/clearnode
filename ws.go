@@ -213,7 +213,7 @@ func (h *UnifiedWSHandler) HandleConnection(w http.ResponseWriter, r *http.Reque
 			}
 
 		case "get_ledger_balances":
-			rpcResponse, handlerErr = HandleGetLedgerBalances(&rpcRequest, h.ledger)
+			rpcResponse, handlerErr = HandleGetLedgerBalances(&rpcRequest, h.db)
 			if handlerErr != nil {
 				log.Printf("Error handling get_ledger_balances: %v", handlerErr)
 				h.sendErrorResponse(address, &rpcRequest.Req, rpcRequest.Sig, conn, "Failed to get ledger balances: "+handlerErr.Error())
@@ -221,7 +221,7 @@ func (h *UnifiedWSHandler) HandleConnection(w http.ResponseWriter, r *http.Reque
 			}
 
 		case "get_app_definition":
-			rpcResponse, handlerErr = HandleGetAppDefinition(&rpcRequest, h.ledger)
+			rpcResponse, handlerErr = HandleGetAppDefinition(&rpcRequest, h.db)
 			if handlerErr != nil {
 				log.Printf("Error handling get_app_definition: %v", handlerErr)
 				h.sendErrorResponse(address, &rpcRequest.Req, rpcRequest.Sig, conn, "Failed to get app definition: "+handlerErr.Error())
@@ -229,7 +229,7 @@ func (h *UnifiedWSHandler) HandleConnection(w http.ResponseWriter, r *http.Reque
 			}
 
 		case "create_app_session":
-			rpcResponse, handlerErr = HandleCreateApplication(&rpcRequest, h.ledger)
+			rpcResponse, handlerErr = HandleCreateApplication(&rpcRequest, h.db)
 			if handlerErr != nil {
 				log.Printf("Error handling create_app_session: %v", handlerErr)
 				h.sendErrorResponse(address, &rpcRequest.Req, rpcRequest.Sig, conn, "Failed to create application: "+handlerErr.Error())
@@ -237,7 +237,7 @@ func (h *UnifiedWSHandler) HandleConnection(w http.ResponseWriter, r *http.Reque
 			}
 
 		case "close_app_session":
-			rpcResponse, handlerErr = HandleCloseApplication(&rpcRequest, h.ledger)
+			rpcResponse, handlerErr = HandleCloseApplication(&rpcRequest, h.db)
 			if handlerErr != nil {
 				log.Printf("Error handling close_app_session: %v", handlerErr)
 				h.sendErrorResponse(address, &rpcRequest.Req, rpcRequest.Sig, conn, "Failed to close application: "+handlerErr.Error())
@@ -245,7 +245,7 @@ func (h *UnifiedWSHandler) HandleConnection(w http.ResponseWriter, r *http.Reque
 			}
 
 		case "resize_channel":
-			rpcResponse, handlerErr = HandleResizeChannel(&rpcRequest, h.ledger, h.signer)
+			rpcResponse, handlerErr = HandleResizeChannel(&rpcRequest, h.db, h.signer)
 			if handlerErr != nil {
 				log.Printf("Error handling resize_channel: %v", handlerErr)
 				h.sendErrorResponse(address, &rpcRequest.Req, rpcRequest.Sig, conn, "Failed to resize channel: "+handlerErr.Error())
@@ -253,14 +253,14 @@ func (h *UnifiedWSHandler) HandleConnection(w http.ResponseWriter, r *http.Reque
 			}
 
 		case "close_channel":
-			rpcResponse, handlerErr = HandleCloseChannel(&rpcRequest, h.ledger, h.signer)
+			rpcResponse, handlerErr = HandleCloseChannel(&rpcRequest, h.db, h.signer)
 			if handlerErr != nil {
 				log.Printf("Error handling close_channel: %v", handlerErr)
 				h.sendErrorResponse(address, &rpcRequest.Req, rpcRequest.Sig, conn, "Failed to close channel: "+handlerErr.Error())
 				continue
 			}
 		case "get_channels":
-			rpcResponse, handlerErr = HandleGetChannels(&rpcRequest, h.ledger)
+			rpcResponse, handlerErr = HandleGetChannels(&rpcRequest, h.db)
 			if handlerErr != nil {
 				log.Printf("Error handling get_channels: %v", handlerErr)
 				h.sendErrorResponse(address, &rpcRequest.Req, rpcRequest.Sig, conn, "Failed to get channels: "+handlerErr.Error())
@@ -334,7 +334,7 @@ func forwardMessage(appID string, rpcData RPCData, signatures []string, msg []by
 	}
 
 	var participants []string
-	err = h.ledger.db.Transaction(func(tx *gorm.DB) error {
+	err = h.db.Transaction(func(tx *gorm.DB) error {
 		var vApp AppSession
 		if err := tx.Where("app_id = ?", appID).First(&vApp).Error; err != nil {
 			return errors.New("failed to find virtual app: " + err.Error())
@@ -374,24 +374,24 @@ func forwardMessage(appID string, rpcData RPCData, signatures []string, msg []by
 				return errors.New("Invalid intent: sum of all intents must be 0")
 			}
 
-			participantsBalances, err := GetBalances(tx, appID)
-			if err != nil {
-				return errors.New("Failed to get participant balance: " + err.Error())
-			}
+			// participantsBalances, err := GetBalances(tx, appID)
+			// if err != nil {
+			// 	return errors.New("Failed to get participant balance: " + err.Error())
+			// }
 
-			for i, participantBalance := range participantsBalances {
-				if participantBalance.Amount+intent[i] < 0 {
-					return errors.New("Invalid intent: insufficient balance for participant " + participantBalance.Asset)
-				}
-			}
+			// for i, participantBalance := range participantsBalances {
+			// 	if participantBalance.Amount+intent[i] < 0 {
+			// 		return errors.New("Invalid intent: insufficient balance for participant " + participantBalance.Asset)
+			// 	}
+			// }
 
-			// Iterate over participants to keep same order with intent
-			for i, participant := range participants {
-				account := h.ledger.SelectBeneficiaryAccount(appID, participant)
-				if err := account.Record(intent[i]); err != nil {
-					return errors.New("Failed to record intent: " + err.Error())
-				}
-			}
+			// // Iterate over participants to keep same order with intent
+			// for i, participant := range participants {
+			// 	account := h.ledger.SelectBeneficiaryAccount(appID, participant)
+			// 	if err := account.Record(intent[i]); err != nil {
+			// 		return errors.New("Failed to record intent: " + err.Error())
+			// 	}
+			// }
 
 			// Update the virtual app version in the database
 			if rpcData.Timestamp <= vApp.Version {

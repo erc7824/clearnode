@@ -14,6 +14,7 @@ import (
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/lib/pq"
+	"github.com/shopspring/decimal"
 	"gorm.io/gorm"
 )
 
@@ -29,9 +30,14 @@ type AppDefinition struct {
 
 // CreateAppSessionParams represents parameters needed for virtual app creation
 type CreateAppSessionParams struct {
-	Definition  AppDefinition `json:"definition"`
-	Allocations []*big.Int    `json:"allocations"`
-	Assets      []string      `json:"asset_ids"`
+	Definition  AppDefinition   `json:"definition"`
+	Allocations []AppAllocation `json:"allocations"`
+}
+
+type AppAllocation struct {
+	Participant string          `json:"participant"`
+	AssetSymbol string          `json:"asset_symbol"`
+	Amount      decimal.Decimal `json:"amount"`
 }
 
 type CreateAppSignData struct {
@@ -48,9 +54,8 @@ func (r CreateAppSignData) MarshalJSON() ([]byte, error) {
 
 // CloseAppSessionParams represents parameters needed for virtual app closure
 type CloseAppSessionParams struct {
-	AppSessionID string     `json:"app_session_id"`
-	Allocations  []*big.Int `json:"allocations"`
-	Assets       []string   `json:"asset_ids"`
+	AppSessionID string          `json:"app_session_id"`
+	Allocations  []AppAllocation `json:"allocations"`
 }
 
 type CloseAppSignData struct {
