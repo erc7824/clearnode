@@ -1,7 +1,7 @@
 # Clearnode Protocol Specification
 
 ## Overview
-The Clearnode protocol is a system for managing payment channels and virtual applications between participants. It provides a secure, efficient way to conduct transactions off-chain while retaining the ability to settle on-chain when required.
+The Clearnode protocol is a system for managing payment channels and virtual applications between participants. It provides a secure, efficient way to conduct transactions off-chain while retaining the ability to settle on-chain when required, with support for multiple blockchain networks.
 
 ## Protocol Flow
 
@@ -38,6 +38,7 @@ The Clearnode protocol is a system for managing payment channels and virtual app
 - The virtual application is marked as closed and message routing is discontinued
 - When participants wish to materialize their balances on-chain, they can request the broker to re-open or update on-chain channels
 - Settlement is only performed when requested by participants, allowing most transactions to remain off-chain
+- Participants can have channels on multiple blockchain networks simultaneously
 
 ## Security Features
 
@@ -57,13 +58,22 @@ The Clearnode protocol is a system for managing payment channels and virtual app
 ### Multi-Chain Support
 - The system supports multiple blockchain networks (currently Polygon and Celo)
 - Each network has its own custody contract address and connection details
-- Network IDs are tracked with channels to ensure proper chain association
+- Chain IDs are tracked with channels to ensure proper chain association
+- Asset models track tokens per chain, with appropriate decimals for each token
+- Channels are created, resized, and closed on their original blockchain network
+- Participants can manage channels across multiple chains simultaneously
+- The broker maintains separate custody contract instances for each supported network
+- Event listeners monitor each blockchain network independently
 
 ## Benefits
 - Efficient, low-cost transactions by keeping most operations off-chain
 - Security guarantees of blockchain when needed
 - Participants can freely transact within their allocated funds in virtual applications
 - On-chain settlement only occurs when participants choose to materialize their balances
+- Cross-chain compatibility allows users to select their preferred blockchain network
+- Multi-chain support provides resilience against network-specific issues
+- Diverse token support across various blockchain ecosystems
+- Flexibility to leverage the unique benefits of each supported blockchain
 
 ## RPC Message Format
 

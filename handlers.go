@@ -137,10 +137,14 @@ type ChannelResponse struct {
 	Status      ChannelStatus `json:"status"`
 	Token       string        `json:"token"`
 	// Total amount in the channel (user + broker)
-	Amount    uint64 `json:"amount"`
-	ChainID   uint32 `json:"network_id"`
-	CreatedAt string `json:"created_at"`
-	UpdatedAt string `json:"updated_at"`
+	Amount      uint64 `json:"amount"`
+	ChainID     uint32 `json:"chain_id"`
+	Adjudicator string `json:"adjudicator"`
+	Challenge   uint64 `json:"challenge"`
+	Nonce       uint64 `json:"nonce"`
+	Version     uint64 `json:"version"`
+	CreatedAt   string `json:"created_at"`
+	UpdatedAt   string `json:"updated_at"`
 }
 
 type Signature struct {
@@ -149,9 +153,17 @@ type Signature struct {
 	S string `json:"s,string"`
 }
 
+// NetworkInfo represents information about a supported network
+type NetworkInfo struct {
+	Name           string `json:"name"`
+	ChainID        uint32 `json:"chainId"`
+	CustodyAddress string `json:"custodyAddress"`
+}
+
 // BrokerConfig represents the broker configuration information
 type BrokerConfig struct {
-	BrokerAddress string `json:"brokerAddress"`
+	BrokerAddress     string        `json:"brokerAddress"`
+	SupportedNetworks []NetworkInfo `json:"supportedNetworks"`
 }
 
 // RPCEntry represents an RPC record from history.
@@ -168,12 +180,24 @@ type RPCEntry struct {
 }
 
 // HandleGetConfig returns the broker configuration
-func HandleGetConfig(rpc *RPCRequest) (*RPCResponse, error) {
-	config := BrokerConfig{
-		BrokerAddress: BrokerAddress,
+func HandleGetConfig(rpc *RPCRequest, config *Config, signer *Signer) (*RPCResponse, error) {
+	supportedNetworks := []NetworkInfo{}
+
+	// Populate the supported networks from the config
+	for name, networkConfig := range config.networks {
+		supportedNetworks = append(supportedNetworks, NetworkInfo{
+			Name:           name,
+			ChainID:        networkConfig.ChainID,
+			CustodyAddress: networkConfig.CustodyAddress,
+		})
 	}
 
-	rpcResponse := CreateResponse(rpc.Req.RequestID, "get_config", []any{config}, time.Now())
+	brokerConfig := BrokerConfig{
+		BrokerAddress:     signer.GetAddress().Hex(),
+		SupportedNetworks: supportedNetworks,
+	}
+
+	rpcResponse := CreateResponse(rpc.Req.RequestID, "get_config", []any{brokerConfig}, time.Now())
 	return rpcResponse, nil
 }
 
@@ -594,7 +618,7 @@ func HandleResizeChannel(rpc *RPCRequest, db *gorm.DB, signer *Signer) (*RPCResp
 			Amount:      rawNewChannelAmount,
 		},
 		{
-			Destination: common.HexToAddress(BrokerAddress),
+			Destination: signer.GetAddress(),
 			Token:       common.HexToAddress(channel.Token),
 			Amount:      big.NewInt(0),
 		},
@@ -718,7 +742,7 @@ func HandleCloseChannel(rpc *RPCRequest, db *gorm.DB, signer *Signer) (*RPCRespo
 			Amount:      rawBalance,
 		},
 		{
-			Destination: common.HexToAddress(BrokerAddress),
+			Destination: signer.GetAddress(),
 			Token:       common.HexToAddress(channel.Token),
 			Amount:      new(big.Int).Sub(channelAmount, rawBalance), // Broker receives the remaining amount
 		},
@@ -812,6 +836,10 @@ func HandleGetChannels(rpc *RPCRequest, db *gorm.DB) (*RPCResponse, error) {
 				Token:       channel.Token,
 				Amount:      channel.Amount,
 				ChainID:     channel.ChainID,
+				Adjudicator: channel.Adjudicator,
+				Challenge:   channel.Challenge,
+				Nonce:       channel.Nonce,
+				Version:     channel.Version,
 				CreatedAt:   channel.CreatedAt.Format(time.RFC3339),
 				UpdatedAt:   channel.UpdatedAt.Format(time.RFC3339),
 			})

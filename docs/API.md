@@ -8,10 +8,10 @@
 | `auth_challenge` | Server response with authentication challenge |
 | `auth_verify` | Completes authentication with a challenge response |
 | `ping` | Simple connectivity check |
-| `get_config` | Retrieves broker configuration |
+| `get_config` | Retrieves broker configuration and supported networks |
 | `get_app_definition` | Retrieves application definition for a ledger account |
 | `get_ledger_balances` | Lists participants and their balances for a ledger account |
-| `get_channels` | Lists all channels for a participant with their status |
+| `get_channels` | Lists all channels for a participant with their status across all chains |
 | `get_rpc_history` | Retrieves all RPC message history for a participant |
 | `create_app_session` | Creates a new virtual application on a ledger |
 | `close_app_session` | Closes a virtual application |
@@ -174,7 +174,11 @@ Retrieves all channels for a participant (both open, closed, and joining), order
       "status": "open",
       "token": "0xeeee567890abcdef...",
       "amount": 100000,
-      "network_id": "137",
+      "chain_id": 137,
+      "adjudicator": "0xAdjudicatorContractAddress...",
+      "challenge": 86400,
+      "nonce": 1,
+      "version": 2,
       "created_at": "2023-05-01T12:00:00Z",
       "updated_at": "2023-05-01T12:30:00Z"
     },
@@ -184,7 +188,11 @@ Retrieves all channels for a participant (both open, closed, and joining), order
       "status": "closed",
       "token": "0xeeee567890abcdef...",
       "amount": 50000,
-      "network_id": "137",
+      "chain_id": 42220,
+      "adjudicator": "0xAdjudicatorContractAddress...",
+      "challenge": 86400,
+      "nonce": 1,
+      "version": 3,
       "created_at": "2023-04-15T10:00:00Z",
       "updated_at": "2023-04-20T14:30:00Z"
     }
@@ -201,7 +209,11 @@ Each channel response includes:
 - `status`: Current status ("open", "closed", or "joining")
 - `token`: The token address for the channel
 - `amount`: Total channel capacity
-- `network_id`: The blockchain network ID where the channel exists
+- `chain_id`: The blockchain network ID where the channel exists (e.g., 137 for Polygon, 42220 for Celo, 8453 for Base)
+- `adjudicator`: The address of the adjudicator contract
+- `challenge`: Challenge period duration in seconds
+- `nonce`: Current nonce value for the channel
+- `version`: Current version of the channel state
 - `created_at`: When the channel was created (ISO 8601 format)
 - `updated_at`: When the channel was last updated (ISO 8601 format)
 
@@ -379,7 +391,7 @@ Adjusts the capacity of a channel.
 {
   "req": [6, "resize_channel", [{
     "channel_id": "0x4567890123abcdef...",
-    "participant_change": "50000",
+    "new_channel_amount": "100000",
     "funds_destination": "0x1234567890abcdef..."
   }], 1619123456789],
   "sig": ["0x9876fedcba..."]
@@ -417,6 +429,8 @@ Adjusts the capacity of a channel.
   "sig": ["0xabcd1234..."]
 }
 ```
+
+The channel will be resized on the blockchain network where it was originally opened, as identified by the `chain_id` associated with the channel. The `new_channel_amount` parameter specifies the desired capacity for the channel.
 
 ## Messaging
 
@@ -476,7 +490,7 @@ Simple ping to check connectivity.
 
 ### Get Configuration
 
-Retrieves broker configuration information.
+Retrieves broker configuration information including supported networks.
 
 **Request:**
 
@@ -492,7 +506,24 @@ Retrieves broker configuration information.
 ```json
 {
   "res": [8, "get_config", [{
-    "brokerAddress": "0xbbbb567890abcdef..."
+    "brokerAddress": "0xbbbb567890abcdef...",
+    "supportedNetworks": [
+      {
+        "name": "polygon",
+        "chainId": 137,
+        "custodyAddress": "0xCustodyContractAddress1..."
+      },
+      {
+        "name": "celo",
+        "chainId": 42220,
+        "custodyAddress": "0xCustodyContractAddress2..."
+      },
+      {
+        "name": "base",
+        "chainId": 8453,
+        "custodyAddress": "0xCustodyContractAddress3..."
+      }
+    ]
   }], 1619123456789],
   "sig": ["0xabcd1234..."]
 }
