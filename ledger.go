@@ -24,20 +24,20 @@ func (Entry) TableName() string {
 	return "ledger"
 }
 
-type Ledger struct {
+type ParticipantLedger struct {
 	participant string
 	db          *gorm.DB
 }
 
-func GetLedger(db *gorm.DB, participant string) *Ledger {
-	return &Ledger{participant: participant, db: db}
+func GetParticipantLedger(db *gorm.DB, participant string) *ParticipantLedger {
+	return &ParticipantLedger{participant: participant, db: db}
 }
 
-func (l *Ledger) Record(accountID string, assetID string, amount decimal.Decimal) error {
+func (l *ParticipantLedger) Record(accountID string, assetSymbol string, amount decimal.Decimal) error {
 	entry := &Entry{
 		AccountID:   accountID,
 		Participant: l.participant,
-		AssetSymbol: assetID,
+		AssetSymbol: assetSymbol,
 		Credit:      decimal.Zero,
 		Debit:       decimal.Zero,
 		CreatedAt:   time.Now(),
@@ -54,13 +54,13 @@ func (l *Ledger) Record(accountID string, assetID string, amount decimal.Decimal
 	return l.db.Create(entry).Error
 }
 
-func (l *Ledger) Balance(accountID common.Hash, assetID string) (decimal.Decimal, error) {
+func (l *ParticipantLedger) Balance(accountID common.Hash, assetSymbol string) (decimal.Decimal, error) {
 	type result struct {
 		Balance decimal.Decimal `gorm:"column:balance"`
 	}
 	var res result
 	if err := l.db.Model(&Entry{}).
-		Where("account_id = ? AND asset_id = ?", accountID, assetID).
+		Where("account_id = ? AND asset_symbol = ?", accountID, assetSymbol).
 		Select("COALESCE(SUM(credit),0) - COALESCE(SUM(debit),0) AS balance").
 		Scan(&res).Error; err != nil {
 		return decimal.Zero, err
@@ -69,13 +69,13 @@ func (l *Ledger) Balance(accountID common.Hash, assetID string) (decimal.Decimal
 }
 
 type Balance struct {
-	Asset  string          `json:"asset"`
-	Amount decimal.Decimal `json:"amount"`
+	AssetSymbol string          `json:"asset_symbol"`
+	Amount      decimal.Decimal `json:"amount"`
 }
 
-func (l *Ledger) GetBalances(accountID string) ([]Balance, error) {
+func (l *ParticipantLedger) GetBalances(accountID string) ([]Balance, error) {
 	type row struct {
-		Asset   string          `gorm:"column:asset_id"`
+		Asset   string          `gorm:"column:asset_symbol"`
 		Balance decimal.Decimal `gorm:"column:balance"`
 	}
 
@@ -83,8 +83,8 @@ func (l *Ledger) GetBalances(accountID string) ([]Balance, error) {
 	if err := l.db.
 		Model(&Entry{}).
 		Where("account_id = ? AND participant = ?", accountID, l.participant).
-		Select("asset_id", "COALESCE(SUM(credit),0) - COALESCE(SUM(debit),0) AS balance").
-		Group("asset_id").
+		Select("asset_symbol", "COALESCE(SUM(credit),0) - COALESCE(SUM(debit),0) AS balance").
+		Group("asset_symbol").
 		Scan(&rows).Error; err != nil {
 		return nil, err
 	}
@@ -92,8 +92,8 @@ func (l *Ledger) GetBalances(accountID string) ([]Balance, error) {
 	balances := make([]Balance, len(rows))
 	for i, r := range rows {
 		balances[i] = Balance{
-			Asset:  r.Asset,
-			Amount: r.Balance,
+			AssetSymbol: r.Asset,
+			Amount:      r.Balance,
 		}
 	}
 	return balances, nil

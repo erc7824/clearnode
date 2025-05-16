@@ -503,12 +503,12 @@ func TestHandleListParticipants(t *testing.T) {
 	}
 
 	for _, ch := range channelsArray {
-		expectedBalance, exists := expectedAddresses[ch.Asset]
-		assert.True(t, exists, "Unexpected address in response: %s", ch.Asset)
-		assert.Equal(t, expectedBalance, ch.Amount, "Incorrect balance for address %s", ch.Asset)
+		expectedBalance, exists := expectedAddresses[ch.AssetSymbol]
+		assert.True(t, exists, "Unexpected address in response: %s", ch.AssetSymbol)
+		assert.Equal(t, expectedBalance, ch.Amount, "Incorrect balance for address %s", ch.AssetSymbol)
 
 		// Remove from map to ensure each address appears only once
-		delete(expectedAddresses, ch.Asset)
+		delete(expectedAddresses, ch.AssetSymbol)
 	}
 
 	assert.Empty(t, expectedAddresses, "Not all expected addresses were found in the response")

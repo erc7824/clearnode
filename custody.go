@@ -26,7 +26,7 @@ var (
 type Custody struct {
 	client       *ethclient.Client
 	custody      *nitrolite.Custody
-	ledger       *Ledger
+	db           *gorm.DB
 	custodyAddr  common.Address
 	transactOpts *bind.TransactOpts
 	networkID    string
@@ -34,7 +34,7 @@ type Custody struct {
 }
 
 // NewCustody initializes the Ethereum client and custody contract wrapper.
-func NewCustody(signer *Signer, ledger *Ledger, infuraURL, custodyAddressStr, networkID string) (*Custody, error) {
+func NewCustody(signer *Signer, db *gorm.DB, infuraURL, custodyAddressStr, networkID string) (*Custody, error) {
 	custodyAddress := common.HexToAddress(custodyAddressStr)
 	client, err := ethclient.Dial(infuraURL)
 	if err != nil {
@@ -62,7 +62,7 @@ func NewCustody(signer *Signer, ledger *Ledger, infuraURL, custodyAddressStr, ne
 	return &Custody{
 		client:       client,
 		custody:      custody,
-		ledger:       ledger,
+		db:           db,
 		custodyAddr:  custodyAddress,
 		transactOpts: auth,
 		networkID:    networkID,
@@ -135,7 +135,7 @@ func (c *Custody) handleBlockChainEvent(l types.Log) {
 		}
 
 		// Check if there is already existing open channel with the broker
-		existingOpenChannel, err := CheckExistingChannels(c.ledger.db, participantA, participantB, c.networkID)
+		existingOpenChannel, err := CheckExistingChannels(c.db, participantA, participantB, c.networkID)
 		if err != nil {
 			log.Printf("[Created] Error checking channels in database: %v", err)
 			return
@@ -151,14 +151,14 @@ func (c *Custody) handleBlockChainEvent(l types.Log) {
 
 		channelID := common.BytesToHash(ev.ChannelId[:]).Hex()
 		err = CreateChannel(
-			c.ledger.db,
+			c.db,
 			channelID,
 			participantA,
 			nonce,
 			ev.Channel.Adjudicator.Hex(),
 			c.networkID,
 			tokenAddress,
-			tokenAmount,
+			uint64(tokenAmount),
 		)
 		if err != nil {
 			log.Printf("[ChannelCreated] Error creating/updating channel in database: %v", err)
@@ -197,7 +197,7 @@ func (c *Custody) handleBlockChainEvent(l types.Log) {
 		log.Printf("Joined event data: %+v\n", ev)
 
 		channelID := common.BytesToHash(ev.ChannelId[:]).Hex()
-		err = c.ledger.db.Transaction(func(tx *gorm.DB) error {
+		err = c.db.Transaction(func(tx *gorm.DB) error {
 			var channel Channel
 			result := tx.Where("channel_id = ?", channelID).First(&channel)
 			if result.Error != nil {
@@ -232,7 +232,7 @@ func (c *Custody) handleBlockChainEvent(l types.Log) {
 
 		channelID := common.BytesToHash(ev.ChannelId[:]).Hex()
 
-		err = c.ledger.db.Transaction(func(tx *gorm.DB) error {
+		err = c.db.Transaction(func(tx *gorm.DB) error {
 			var channel Channel
 			result := tx.Where("channel_id = ?", channelID).First(&channel)
 			if result.Error != nil {
@@ -284,19 +284,19 @@ func (c *Custody) handleBlockChainEvent(l types.Log) {
 		channelID := common.BytesToHash(ev.ChannelId[:])
 
 		var channel Channel
-		result := c.ledger.db.Where("channel_id = ?", channelID.Hex()).First(&channel)
+		result := c.db.Where("channel_id = ?", channelID.Hex()).First(&channel)
 		if result.Error != nil {
 			log.Println("error finding channel:", result.Error)
 			return
 		}
 
 		for _, change := range ev.DeltaAllocations {
-			channel.Amount += change.Int64()
+			channel.Amount += uint64(change.Int64())
 		}
 
 		channel.UpdatedAt = time.Now()
 		channel.Version++
-		if err := c.ledger.db.Save(&channel).Error; err != nil {
+		if err := c.db.Save(&channel).Error; err != nil {
 			log.Printf("[Resized] Error saving channel in database: %v", err)
 			return
 		}

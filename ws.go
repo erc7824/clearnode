@@ -19,7 +19,7 @@ import (
 // UnifiedWSHandler manages WebSocket connections with authentication
 type UnifiedWSHandler struct {
 	signer        *Signer
-	ledger        *Ledger
+	db            *gorm.DB
 	upgrader      websocket.Upgrader
 	connections   map[string]*websocket.Conn
 	connectionsMu sync.RWMutex
@@ -30,13 +30,13 @@ type UnifiedWSHandler struct {
 
 func NewUnifiedWSHandler(
 	signer *Signer,
-	ledger *Ledger,
+	db *gorm.DB,
 	metrics *Metrics,
 	rpcStore *RPCStore,
 ) *UnifiedWSHandler {
 	return &UnifiedWSHandler{
 		signer: signer,
-		ledger: ledger,
+		db:     db,
 		upgrader: websocket.Upgrader{
 			ReadBufferSize:  1024,
 			WriteBufferSize: 1024,
