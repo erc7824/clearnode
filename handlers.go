@@ -180,7 +180,7 @@ type RPCEntry struct {
 }
 
 // HandleGetConfig returns the broker configuration
-func HandleGetConfig(rpc *RPCRequest, config *Config, signer *Signer) (*RPCResponse, error) {
+func HandleGetConfig(rpc *RPCMessage, config *Config, signer *Signer) (*RPCMessage, error) {
 	supportedNetworks := []NetworkInfo{}
 
 	// Populate the supported networks from the config
@@ -197,21 +197,21 @@ func HandleGetConfig(rpc *RPCRequest, config *Config, signer *Signer) (*RPCRespo
 		SupportedNetworks: supportedNetworks,
 	}
 
-	rpcResponse := CreateResponse(rpc.Req.RequestID, "get_config", []any{brokerConfig}, time.Now())
+	rpcResponse := CreateResponse(rpc.Data.RequestID, "get_config", []any{brokerConfig}, time.Now())
 	return rpcResponse, nil
 }
 
 // HandlePing responds to a ping request with a pong response in RPC format
-func HandlePing(rpc *RPCRequest) (*RPCResponse, error) {
-	return CreateResponse(rpc.Req.RequestID, "pong", []any{}, time.Now()), nil
+func HandlePing(rpc *RPCMessage) (*RPCMessage, error) {
+	return CreateResponse(rpc.Data.RequestID, "pong", []any{}, time.Now()), nil
 }
 
 // HandleGetLedgerBalances returns a list of participants and their balances for a ledger account
-func HandleGetLedgerBalances(rpc *RPCRequest, address string, db *gorm.DB) (*RPCResponse, error) {
+func HandleGetLedgerBalances(rpc *RPCMessage, address string, db *gorm.DB) (*RPCMessage, error) {
 	var accountID string
 
-	if len(rpc.Req.Params) > 0 {
-		paramsJSON, err := json.Marshal(rpc.Req.Params[0])
+	if len(rpc.Data.Params) > 0 {
+		paramsJSON, err := json.Marshal(rpc.Data.Params[0])
 		if err == nil {
 			var params map[string]string
 			if err := json.Unmarshal(paramsJSON, &params); err == nil {
@@ -226,18 +226,18 @@ func HandleGetLedgerBalances(rpc *RPCRequest, address string, db *gorm.DB) (*RPC
 		return nil, fmt.Errorf("failed to find account: %w", err)
 	}
 
-	rpcResponse := CreateResponse(rpc.Req.RequestID, rpc.Req.Method, []any{balances}, time.Now())
+	rpcResponse := CreateResponse(rpc.Data.RequestID, rpc.Data.Method, []any{balances}, time.Now())
 	return rpcResponse, nil
 }
 
 // HandleCreateApplication creates a virtual application between participants
-func HandleCreateApplication(rpc *RPCRequest, db *gorm.DB) (*RPCResponse, error) {
-	if len(rpc.Req.Params) < 1 {
+func HandleCreateApplication(rpc *RPCMessage, db *gorm.DB) (*RPCMessage, error) {
+	if len(rpc.Data.Params) < 1 {
 		return nil, errors.New("missing parameters")
 	}
 
 	var createApp CreateAppSessionParams
-	paramsJSON, err := json.Marshal(rpc.Req.Params[0])
+	paramsJSON, err := json.Marshal(rpc.Data.Params[0])
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse parameters: %w", err)
 	}
@@ -265,7 +265,7 @@ func HandleCreateApplication(rpc *RPCRequest, db *gorm.DB) (*RPCResponse, error)
 	}
 
 	if createApp.Definition.Nonce == 0 {
-		createApp.Definition.Nonce = rpc.Req.Timestamp
+		createApp.Definition.Nonce = rpc.Data.Timestamp
 	}
 
 	// Generate a unique ID for the virtual application
@@ -273,10 +273,10 @@ func HandleCreateApplication(rpc *RPCRequest, db *gorm.DB) (*RPCResponse, error)
 	appSessionID := crypto.Keccak256Hash(b)
 
 	req := CreateAppSignData{
-		RequestID: rpc.Req.RequestID,
-		Method:    rpc.Req.Method,
+		RequestID: rpc.Data.RequestID,
+		Method:    rpc.Data.Method,
 		Params:    []CreateAppSessionParams{{Definition: createApp.Definition, Allocations: createApp.Allocations}},
-		Timestamp: rpc.Req.Timestamp,
+		Timestamp: rpc.Data.Timestamp,
 	}
 
 	reqBytes, err := json.Marshal(req)
@@ -336,7 +336,7 @@ func HandleCreateApplication(rpc *RPCRequest, db *gorm.DB) (*RPCResponse, error)
 			Weights:      weights,
 			Quorum:       createApp.Definition.Quorum,
 			Nonce:        createApp.Definition.Nonce,
-			Version:      rpc.Req.Timestamp,
+			Version:      rpc.Data.Timestamp,
 		}
 
 		if err := tx.Create(appSession).Error; err != nil {
@@ -355,18 +355,18 @@ func HandleCreateApplication(rpc *RPCRequest, db *gorm.DB) (*RPCResponse, error)
 		Status:       string(ChannelStatusOpen),
 	}
 
-	rpcResponse := CreateResponse(rpc.Req.RequestID, rpc.Req.Method, []any{response}, time.Now())
+	rpcResponse := CreateResponse(rpc.Data.RequestID, rpc.Data.Method, []any{response}, time.Now())
 	return rpcResponse, nil
 }
 
 // HandleCloseApplication closes a virtual app session and redistributes funds to participants
-func HandleCloseApplication(rpc *RPCRequest, db *gorm.DB) (*RPCResponse, error) {
-	if len(rpc.Req.Params) == 0 {
+func HandleCloseApplication(rpc *RPCMessage, db *gorm.DB) (*RPCMessage, error) {
+	if len(rpc.Data.Params) == 0 {
 		return nil, errors.New("missing parameters")
 	}
 
 	var params CloseAppSessionParams
-	paramsJSON, err := json.Marshal(rpc.Req.Params[0])
+	paramsJSON, err := json.Marshal(rpc.Data.Params[0])
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse parameters: %w", err)
 	}
@@ -388,10 +388,10 @@ func HandleCloseApplication(rpc *RPCRequest, db *gorm.DB) (*RPCResponse, error) 
 	}
 
 	req := CloseAppSignData{
-		RequestID: rpc.Req.RequestID,
-		Method:    rpc.Req.Method,
+		RequestID: rpc.Data.RequestID,
+		Method:    rpc.Data.Method,
 		Params:    []CloseAppSessionParams{{AppSessionID: params.AppSessionID, Allocations: params.Allocations}},
-		Timestamp: rpc.Req.Timestamp,
+		Timestamp: rpc.Data.Timestamp,
 	}
 
 	reqBytes, err := json.Marshal(req)
@@ -508,16 +508,16 @@ func HandleCloseApplication(rpc *RPCRequest, db *gorm.DB) (*RPCResponse, error) 
 		Status:       string(ChannelStatusClosed),
 	}
 
-	rpcResponse := CreateResponse(rpc.Req.RequestID, rpc.Req.Method, []any{response}, time.Now())
+	rpcResponse := CreateResponse(rpc.Data.RequestID, rpc.Data.Method, []any{response}, time.Now())
 	return rpcResponse, nil
 }
 
 // HandleGetAppDefinition returns the application definition for a ledger account
-func HandleGetAppDefinition(rpc *RPCRequest, db *gorm.DB) (*RPCResponse, error) {
+func HandleGetAppDefinition(rpc *RPCMessage, db *gorm.DB) (*RPCMessage, error) {
 	var sessionID string
 
-	if len(rpc.Req.Params) > 0 {
-		paramsJSON, err := json.Marshal(rpc.Req.Params[0])
+	if len(rpc.Data.Params) > 0 {
+		paramsJSON, err := json.Marshal(rpc.Data.Params[0])
 		if err == nil {
 			var params map[string]string
 			if err := json.Unmarshal(paramsJSON, &params); err == nil {
@@ -548,18 +548,18 @@ func HandleGetAppDefinition(rpc *RPCRequest, db *gorm.DB) (*RPCResponse, error) 
 		appDef.Weights[i] = uint64(vApp.Weights[i])
 	}
 
-	rpcResponse := CreateResponse(rpc.Req.RequestID, rpc.Req.Method, []any{appDef}, time.Now())
+	rpcResponse := CreateResponse(rpc.Data.RequestID, rpc.Data.Method, []any{appDef}, time.Now())
 	return rpcResponse, nil
 }
 
 // HandleResizeChannel processes a request to resize a payment channel
-func HandleResizeChannel(rpc *RPCRequest, db *gorm.DB, signer *Signer) (*RPCResponse, error) {
-	if len(rpc.Req.Params) < 1 {
+func HandleResizeChannel(rpc *RPCMessage, db *gorm.DB, signer *Signer) (*RPCMessage, error) {
+	if len(rpc.Data.Params) < 1 {
 		return nil, errors.New("missing parameters")
 	}
 
 	var params ResizeChannelParams
-	paramsJSON, err := json.Marshal(rpc.Req.Params[0])
+	paramsJSON, err := json.Marshal(rpc.Data.Params[0])
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse parameters: %w", err)
 	}
@@ -574,10 +574,10 @@ func HandleResizeChannel(rpc *RPCRequest, db *gorm.DB, signer *Signer) (*RPCResp
 	}
 
 	req := ResizeChannelSignData{
-		RequestID: rpc.Req.RequestID,
-		Method:    rpc.Req.Method,
+		RequestID: rpc.Data.RequestID,
+		Method:    rpc.Data.Method,
 		Params:    []ResizeChannelParams{{ChannelID: params.ChannelID, NewAmount: params.NewAmount, FundsDestination: params.FundsDestination}},
-		Timestamp: rpc.Req.Timestamp,
+		Timestamp: rpc.Data.Timestamp,
 	}
 
 	reqBytes, err := json.Marshal(req)
@@ -675,18 +675,18 @@ func HandleResizeChannel(rpc *RPCRequest, db *gorm.DB, signer *Signer) (*RPCResp
 		})
 	}
 
-	rpcResponse := CreateResponse(rpc.Req.RequestID, rpc.Req.Method, []any{response}, time.Now())
+	rpcResponse := CreateResponse(rpc.Data.RequestID, rpc.Data.Method, []any{response}, time.Now())
 	return rpcResponse, nil
 }
 
 // HandleCloseChannel processes a request to close a payment channel
-func HandleCloseChannel(rpc *RPCRequest, db *gorm.DB, signer *Signer) (*RPCResponse, error) {
-	if len(rpc.Req.Params) < 1 {
+func HandleCloseChannel(rpc *RPCMessage, db *gorm.DB, signer *Signer) (*RPCMessage, error) {
+	if len(rpc.Data.Params) < 1 {
 		return nil, errors.New("missing parameters")
 	}
 
 	var params CloseChannelParams
-	paramsJSON, err := json.Marshal(rpc.Req.Params[0])
+	paramsJSON, err := json.Marshal(rpc.Data.Params[0])
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse parameters: %w", err)
 	}
@@ -700,7 +700,7 @@ func HandleCloseChannel(rpc *RPCRequest, db *gorm.DB, signer *Signer) (*RPCRespo
 		return nil, fmt.Errorf("failed to find channel: %w", err)
 	}
 
-	reqBytes, err := json.Marshal(rpc.Req)
+	reqBytes, err := json.Marshal(rpc.Data)
 	if err != nil {
 		return nil, errors.New("error serializing message")
 	}
@@ -787,17 +787,17 @@ func HandleCloseChannel(rpc *RPCRequest, db *gorm.DB, signer *Signer) (*RPCRespo
 		})
 	}
 
-	rpcResponse := CreateResponse(rpc.Req.RequestID, rpc.Req.Method, []any{response}, time.Now())
+	rpcResponse := CreateResponse(rpc.Data.RequestID, rpc.Data.Method, []any{response}, time.Now())
 	return rpcResponse, nil
 }
 
 // HandleGetChannels returns a list of channels for a given account
 // TODO: add filters, pagination, etc.
-func HandleGetChannels(rpc *RPCRequest, db *gorm.DB) (*RPCResponse, error) {
+func HandleGetChannels(rpc *RPCMessage, db *gorm.DB) (*RPCMessage, error) {
 	var participant string
 
-	if len(rpc.Req.Params) > 0 {
-		paramsJSON, err := json.Marshal(rpc.Req.Params[0])
+	if len(rpc.Data.Params) > 0 {
+		paramsJSON, err := json.Marshal(rpc.Data.Params[0])
 		if err == nil {
 			var params map[string]string
 			if err := json.Unmarshal(paramsJSON, &params); err == nil {
@@ -810,7 +810,7 @@ func HandleGetChannels(rpc *RPCRequest, db *gorm.DB) (*RPCResponse, error) {
 		return nil, errors.New("missing participant parameter")
 	}
 
-	reqBytes, err := json.Marshal(rpc.Req)
+	reqBytes, err := json.Marshal(rpc.Data)
 	if err != nil {
 		return nil, errors.New("error serializing message")
 	}
@@ -852,7 +852,7 @@ func HandleGetChannels(rpc *RPCRequest, db *gorm.DB) (*RPCResponse, error) {
 		return nil, err
 	}
 
-	rpcResponse := CreateResponse(rpc.Req.RequestID, rpc.Req.Method, []any{channelResponses}, time.Now())
+	rpcResponse := CreateResponse(rpc.Data.RequestID, rpc.Data.Method, []any{channelResponses}, time.Now())
 	return rpcResponse, nil
 }
 

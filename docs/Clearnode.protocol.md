@@ -10,7 +10,7 @@ The Clearnode protocol is a system for managing payment channels and virtual app
 - Participants create on-chain channels through custody contracts (supported on multiple chains including Polygon and Celo)
 - Channel creation events from the blockchain are received through webhooks and processed by the `EventHandler`
 - These events credit participants' balances in the internal ledger system
-- Each participant has an `Account` in the ledger tied to their address, channel ID, and token address
+- Each participant has an `Account` in the ledger tied to their address.
 
 ### 2. Virtual Application Creation
 - After being credited from on-chain channels, participants can create virtual applications with other participants
@@ -64,6 +64,7 @@ The Clearnode protocol is a system for managing payment channels and virtual app
 - Participants can manage channels across multiple chains simultaneously
 - The broker maintains separate custody contract instances for each supported network
 - Event listeners monitor each blockchain network independently
+- The `get_channels` method returns all channels for a participant across all supported chains
 
 ## Benefits
 - Efficient, low-cost transactions by keeping most operations off-chain
@@ -79,32 +80,25 @@ The Clearnode protocol is a system for managing payment channels and virtual app
 
 All messages exchanged between clients and clearnodes follow this standardized format:
 
-### Request Message Structure
+### Message Structure
 
 ```json
 {
-  "req": [REQUEST_ID, METHOD, [PARAMETERS], TIMESTAMP],
-  "sig": ["SIGNATURE"]  // Client's signature of the entire "req" object
+  "data": [REQUEST_ID, TYPE, METHOD, [PARAMETERS], TIMESTAMP],
+  "sig": ["SIGNATURE"]  // Client's signature of the entire "data" object
 }
 ```
 
 - The `sig` field contains one or more signatures, ensuring proof-of-history integrity.
 
-### Response Message Structure
-
-```json
-{
-  "res": [REQUEST_ID, METHOD, [RESPONSE_DATA], TIMESTAMP],
-  "sig": ["SIGNATURE"]
-}
-```
 
 The structure breakdown:
 
-- `REQUEST_ID`: A unique identifier for the request (`uint64`)
+- `REQUEST_ID`: A unique identifier for the request/response pair (`uint64`)
+- `TYPE`: Request `req` or response `res` type (`string`)
 - `METHOD`: The name of the method being called (`string`)
 - `PARAMETERS`/`RESPONSE_DATA`: An array of parameters/response data (`[]any`)
-- `TIMESTAMP`: Unix timestamp of the request/response (`uint64`)
+- `TIMESTAMP`: Unix timestamp of the request/response in milliseconds (`uint64`)
 - `SIGNATURE`: Cryptographic signatures of the message (`[]string`). Multiple signatures may be required for certain operations.
 
 ## Data Types
@@ -152,13 +146,34 @@ The server verifies that:
 
 If authentication is successful, the server responds with a success confirmation.
 
+## Broker Configuration
+
+The broker provides configuration information through the `get_config` method, including:
+
+- Broker's Ethereum address
+- Supported blockchain networks with:
+  - Network name
+  - Chain ID
+  - Custody contract address
+
+This allows clients to understand which networks are supported and how to interact with them.
+
 ## Peer-to-Peer Messaging
 
 The broker supports bi-directional peer-to-peer messaging between participants in a virtual application. Both requests and responses can be forwarded between participants when they include AppID.
 
 ## Error Handling
 
-When an error occurs, the server responds with an error message.
+When an error occurs, the server responds with an error message:
+
+```json
+{
+  "data": [REQUEST_ID, "res", "error", [{
+    "error": "Error message describing what went wrong"
+  }], TIMESTAMP],
+  "sig": ["SIGNATURE"]
+}
+```
 
 ## Security Considerations
 
@@ -170,6 +185,7 @@ When an error occurs, the server responds with an error message.
 6. **Address Binding**: Each challenge is stored with the address that requested it
 7. **Random Challenge Strings**: Secure, random strings are used as challenge tokens
 8. **Quorum Signatures**: Application closure requires signatures meeting or exceeding the quorum threshold
+9. **Chain Association**: Each channel is firmly associated with its originating blockchain network
 
 ## Client Implementation Guidelines
 
@@ -190,7 +206,12 @@ When an error occurs, the server responds with an error message.
    - Handle rate limiting errors by implementing backoff strategies
    - Implement timeouts for all requests
 
-4. **Security Best Practices**:
+4. **Multi-Chain Awareness**:
+   - Check the broker's supported networks using `get_config`
+   - Track channel `chain_id` values to ensure operations target the correct network
+   - Be aware that channel operations (close, resize) must be performed on the blockchain where the channel was created
+
+5. **Security Best Practices**:
    - Never reuse signatures across different sessions or services
    - Verify all message signatures from the server before processing
    - Ensure your private key is securely stored and never exposed

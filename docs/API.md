@@ -19,6 +19,38 @@
 | `resize_channel` | Adjusts channel capacity |
 | `message` | Sends a message to all participants in a virtual application |
 
+## RPC Message Format
+
+All communication uses a consistent JSON format. Each message contains:
+
+1. A data array `[request_id, type, method, params, timestamp]`
+2. A signature array with signatures from involved parties
+
+### Request Format
+
+```json
+{
+  "data": [1, "req", "method_name", [params], 1619123456789],
+  "sig": ["0x5432abcdef..."]
+}
+```
+
+### Response Format
+
+```json
+{
+  "res": [1, "res", [result], 1619123456789],
+  "sig": ["0x9876fedcba..."]
+}
+```
+
+- `id`: A unique identifier for the request/response pair (uint64)
+- `type`: Request `req` or response `res`.
+- `method`: The RPC method name (string)
+- `params`: Array of method parameters or results
+- `timestamp`: Unix timestamp in milliseconds (uint64)
+- `sig`: Array of signatures from the participants or the broker
+
 ## Authentication
 
 ### Authentication Request
@@ -150,7 +182,7 @@ Retrieves the balances of all participants in a specific ledger account.
 
 ### Get Channels
 
-Retrieves all channels for a participant (both open, closed, and joining), ordered by creation date (newest first).
+Retrieves all channels for a participant (both open, closed, and joining), ordered by creation date (newest first). This method returns channels across all supported chains.
 
 **Request:**
 
