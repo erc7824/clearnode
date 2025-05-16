@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -146,20 +147,18 @@ func TestHandleCloseVirtualApp(t *testing.T) {
 
 	tokenAddress := "0xToken123"
 	require.NoError(t, db.Create(&Channel{
-		ChannelID:    "0xChannelA",
-		Participant:  participantA,
-		ParticipantB: BrokerAddress,
-		Status:       ChannelStatusOpen,
-		Token:        tokenAddress,
-		Nonce:        1,
+		ChannelID:   "0xChannelA",
+		Participant: participantA,
+		Status:      ChannelStatusOpen,
+		Token:       tokenAddress,
+		Nonce:       1,
 	}).Error)
 	require.NoError(t, db.Create(&Channel{
-		ChannelID:    "0xChannelB",
-		Participant:  participantB,
-		ParticipantB: BrokerAddress,
-		Status:       ChannelStatusOpen,
-		Token:        tokenAddress,
-		Nonce:        1,
+		ChannelID:   "0xChannelB",
+		Participant: participantB,
+		Status:      ChannelStatusOpen,
+		Token:       tokenAddress,
+		Nonce:       1,
 	}).Error)
 
 	// Create a virtual app
@@ -173,11 +172,11 @@ func TestHandleCloseVirtualApp(t *testing.T) {
 		Quorum:       100,
 	}).Error)
 
-	// credit the v-app account
-	require.NoError(t, ledger.SelectBeneficiaryAccount(vAppID, participantA).Record(200))
-	require.NoError(t, ledger.SelectBeneficiaryAccount(vAppID, participantB).Record(300))
-
 	assetSymbol := "usdc"
+
+	require.NoError(t, GetParticipantLedger(db, participantA).Record(vAppID, assetSymbol, decimal.NewFromInt(200)))
+	require.NoError(t, GetParticipantLedger(db, participantB).Record(vAppID, assetSymbol, decimal.NewFromInt(300)))
+
 	closeParams := CloseAppSessionParams{
 		AppSessionID: vAppID,
 		Allocations: []AppAllocation{
@@ -215,21 +214,19 @@ func TestHandleCloseVirtualApp(t *testing.T) {
 	assert.Equal(t, ChannelStatusClosed, updated.Status)
 
 	// Check that funds were transferred back to channels according to allocations
-	balA, _ := ledger.SelectBeneficiaryAccount(participantA, participantA).Balance()
-	balB, _ := ledger.SelectBeneficiaryAccount(participantB, participantB).Balance()
-	assert.Equal(t, int64(250), balA)
-	assert.Equal(t, int64(250), balB)
+	balA, _ := GetParticipantLedger(db, participantA).Balance(participantA, "usdc")
+	balB, _ := GetParticipantLedger(db, participantB).Balance(participantB, "usdc")
+	assert.Equal(t, decimal.NewFromInt(250), balA)
+	assert.Equal(t, decimal.NewFromInt(250), balB)
 
 	// ► v-app accounts drained
-	vBalA, _ := ledger.SelectBeneficiaryAccount(vAppID, participantA).Balance()
-	vBalB, _ := ledger.SelectBeneficiaryAccount(vAppID, participantB).Balance()
-	assert.Zero(t, vBalA)
-	assert.Zero(t, vBalB)
+	vBalA, _ := GetParticipantLedger(db, participantA).Balance(vAppID, "usdc")
+	vBalB, _ := GetParticipantLedger(db, participantB).Balance(vAppID, "usdc")
+
+	assert.True(t, vBalA.IsZero(), "Participant A vApp balance should be zero")
+	assert.True(t, vBalB.IsZero(), "Participant B vApp balance should be zero")
 }
 
-// ───────────────────────────────────────────────────────────────────────────────
-// TestHandleCreateVirtualApp – updated for new funding path & schema
-// ───────────────────────────────────────────────────────────────────────────────
 func TestHandleCreateVirtualApp(t *testing.T) {
 	// Generate private keys for both participants
 	rawA, _ := crypto.GenerateKey()
@@ -246,18 +243,17 @@ func TestHandleCreateVirtualApp(t *testing.T) {
 	token := "0xTokenXYZ"
 	for i, p := range []string{addrA, addrB} {
 		ch := &Channel{
-			ChannelID:    fmt.Sprintf("0xChannel%c", 'A'+i),
-			Participant:  p,
-			ParticipantB: BrokerAddress,
-			Status:       ChannelStatusOpen,
-			Token:        token,
-			Nonce:        1,
+			ChannelID:   fmt.Sprintf("0xChannel%c", 'A'+i),
+			Participant: p,
+			Status:      ChannelStatusOpen,
+			Token:       token,
+			Nonce:       1,
 		}
 		require.NoError(t, db.Create(ch).Error)
 	}
 
-	require.NoError(t, ledger.SelectBeneficiaryAccount(addrA, addrA).Record(100))
-	require.NoError(t, ledger.SelectBeneficiaryAccount(addrB, addrB).Record(200))
+	require.NoError(t, GetParticipantLedger(db, addrA).Record(addrA, "usdc", decimal.NewFromInt(100)))
+	require.NoError(t, GetParticipantLedger(db, addrB).Record(addrB, "usdc", decimal.NewFromInt(200)))
 
 	ts := uint64(time.Now().Unix())
 	def := AppDefinition{
@@ -313,16 +309,16 @@ func TestHandleCreateVirtualApp(t *testing.T) {
 	assert.ElementsMatch(t, []string{addrA, addrB}, vApp.Participants)
 
 	// ► participant accounts drained
-	partBalA, _ := ledger.SelectBeneficiaryAccount(addrA, addrA).Balance()
-	partBalB, _ := ledger.SelectBeneficiaryAccount(addrB, addrB).Balance()
-	assert.Zero(t, partBalA)
-	assert.Zero(t, partBalB)
+	partBalA, _ := GetParticipantLedger(db, addrA).Balance(addrA, "usdc")
+	partBalB, _ := GetParticipantLedger(db, addrB).Balance(addrB, "usdc")
+	assert.True(t, partBalA.IsZero(), "Participant A balance should be zero")
+	assert.True(t, partBalB.IsZero(), "Participant B balance should be zero")
 
-	// ► virtual-app funded
-	vBalA, _ := ledger.SelectBeneficiaryAccount(appResp.AppSessionID, addrA).Balance()
-	vBalB, _ := ledger.SelectBeneficiaryAccount(appResp.AppSessionID, addrB).Balance()
-	assert.Equal(t, int64(100), vBalA)
-	assert.Equal(t, int64(200), vBalB)
+	// ► virtual-app funded - each participant can see the total app session balance (300)
+	vBalA, _ := GetParticipantLedger(db, addrA).Balance(appResp.AppSessionID, "usdc")
+	vBalB, _ := GetParticipantLedger(db, addrB).Balance(appResp.AppSessionID, "usdc")
+	assert.Equal(t, decimal.NewFromInt(100).String(), vBalA.String())
+	assert.Equal(t, decimal.NewFromInt(200).String(), vBalB.String())
 }
 
 // TestHandleListParticipants tests the list available channels handler functionality
@@ -331,41 +327,13 @@ func TestHandleListParticipants(t *testing.T) {
 	db, cleanup := setupTestDB(t)
 	defer cleanup()
 
-	// Create test channels with the broker
-	participants := []struct {
-		address        string
-		channelID      string
-		initialBalance int64
-		status         ChannelStatus
-	}{
-		{"0xParticipant1", "0xChannel1", 1000, ChannelStatusOpen},
-	}
-
-	// Insert channels and ledger entries for testing
-	for _, p := range participants {
-		// Create channel
-		channel := Channel{
-			ChannelID:    p.channelID,
-			Participant:  p.address,
-			ParticipantB: BrokerAddress,
-			Status:       p.status,
-			CreatedAt:    time.Now(),
-			UpdatedAt:    time.Now(),
-		}
-		err := db.Create(&channel).Error
-		require.NoError(t, err)
-
-		// Add funds if needed
-		if p.initialBalance > 0 {
-			account := ledger.SelectBeneficiaryAccount(p.channelID, p.address)
-			err = account.Record(p.initialBalance)
-			require.NoError(t, err)
-		}
-	}
+	ledger := GetParticipantLedger(db, "0xParticipant1")
+	err := ledger.Record("0xParticipant1", "usdc", decimal.NewFromInt(1000))
+	require.NoError(t, err)
 
 	// Create RPC request with token address parameter
 	params := map[string]string{
-		"acc": "0xChannel1",
+		"acc": "0xParticipant1",
 	}
 	paramsJSON, err := json.Marshal(params)
 	require.NoError(t, err)
@@ -398,20 +366,20 @@ func TestHandleListParticipants(t *testing.T) {
 	assert.Equal(t, 1, len(channelsArray), "Should have 4 channels")
 
 	// Check the contents of each channel response
-	expectedAddresses := map[string]int64{
-		"0xParticipant1": 1000,
+	expectedAssets := map[string]decimal.Decimal{
+		"usdc": decimal.NewFromInt(1000),
 	}
 
 	for _, ch := range channelsArray {
-		expectedBalance, exists := expectedAddresses[ch.AssetSymbol]
+		expectedBalance, exists := expectedAssets[ch.AssetSymbol]
 		assert.True(t, exists, "Unexpected address in response: %s", ch.AssetSymbol)
 		assert.Equal(t, expectedBalance, ch.Amount, "Incorrect balance for address %s", ch.AssetSymbol)
 
 		// Remove from map to ensure each address appears only once
-		delete(expectedAddresses, ch.AssetSymbol)
+		delete(expectedAssets, ch.AssetSymbol)
 	}
 
-	assert.Empty(t, expectedAddresses, "Not all expected addresses were found in the response")
+	assert.Empty(t, expectedAssets, "Not all expected addresses were found in the response")
 }
 
 // TestHandleGetConfig tests the get config handler functionality
@@ -457,40 +425,40 @@ func TestHandleGetChannels(t *testing.T) {
 
 	channels := []Channel{
 		{
-			ChannelID:    "0xChannel1",
-			Participant:  participantAddr,
-			ParticipantB: BrokerAddress,
-			Status:       ChannelStatusOpen,
-			Token:        tokenAddress,
-			ChainID:      chainID,
-			Amount:       1000,
-			Nonce:        1,
-			CreatedAt:    time.Now().Add(-24 * time.Hour), // 1 day ago
-			UpdatedAt:    time.Now(),
+			ChannelID:   "0xChannel1",
+			Participant: participantAddr,
+			Status:      ChannelStatusOpen,
+			Token:       tokenAddress + "1",
+			ChainID:     chainID,
+			Amount:      1000,
+			Nonce:       1,
+			Adjudicator: "0xAdj1",
+			CreatedAt:   time.Now().Add(-24 * time.Hour), // 1 day ago
+			UpdatedAt:   time.Now(),
 		},
 		{
-			ChannelID:    "0xChannel2",
-			Participant:  participantAddr,
-			ParticipantB: BrokerAddress,
-			Status:       ChannelStatusClosed,
-			Token:        tokenAddress,
-			ChainID:      chainID,
-			Amount:       2000,
-			Nonce:        2,
-			CreatedAt:    time.Now().Add(-12 * time.Hour), // 12 hours ago
-			UpdatedAt:    time.Now(),
+			ChannelID:   "0xChannel2",
+			Participant: participantAddr,
+			Status:      ChannelStatusClosed,
+			Token:       tokenAddress + "2",
+			ChainID:     chainID,
+			Amount:      2000,
+			Nonce:       2,
+			Adjudicator: "0xAdj2",
+			CreatedAt:   time.Now().Add(-12 * time.Hour), // 12 hours ago
+			UpdatedAt:   time.Now(),
 		},
 		{
-			ChannelID:    "0xChannel3",
-			Participant:  participantAddr,
-			ParticipantB: BrokerAddress,
-			Status:       ChannelStatusJoining,
-			Token:        tokenAddress,
-			ChainID:      chainID,
-			Amount:       3000,
-			Nonce:        3,
-			CreatedAt:    time.Now().Add(-6 * time.Hour), // 6 hours ago
-			UpdatedAt:    time.Now(),
+			ChannelID:   "0xChannel3",
+			Participant: participantAddr,
+			Status:      ChannelStatusJoining,
+			Token:       tokenAddress + "3",
+			ChainID:     chainID,
+			Amount:      3000,
+			Nonce:       3,
+			Adjudicator: "0xAdj3",
+			CreatedAt:   time.Now().Add(-6 * time.Hour), // 6 hours ago
+			UpdatedAt:   time.Now(),
 		},
 	}
 
@@ -499,16 +467,16 @@ func TestHandleGetChannels(t *testing.T) {
 	}
 
 	otherChannel := Channel{
-		ChannelID:    "0xOtherChannel",
-		Participant:  "0xOtherParticipant",
-		ParticipantB: BrokerAddress,
-		Status:       ChannelStatusOpen,
-		Token:        tokenAddress,
-		ChainID:      chainID,
-		Amount:       5000,
-		Nonce:        4,
-		CreatedAt:    time.Now(),
-		UpdatedAt:    time.Now(),
+		ChannelID:   "0xOtherChannel",
+		Participant: "0xOtherParticipant",
+		Status:      ChannelStatusOpen,
+		Token:       tokenAddress + "4",
+		ChainID:     chainID,
+		Amount:      5000,
+		Nonce:       4,
+		Adjudicator: "0xAdj4",
+		CreatedAt:   time.Now(),
+		UpdatedAt:   time.Now(),
 	}
 	require.NoError(t, db.Create(&otherChannel).Error)
 
@@ -555,7 +523,8 @@ func TestHandleGetChannels(t *testing.T) {
 	// Verify channel data is correct
 	for _, ch := range channelsSlice {
 		assert.Equal(t, participantAddr, ch.Participant, "ParticipantA should match")
-		assert.Equal(t, tokenAddress, ch.Token, "Token should match")
+		// Token now has a suffix, so we check it starts with the base token address
+		assert.True(t, strings.HasPrefix(ch.Token, tokenAddress), "Token should start with the base token address")
 		assert.Equal(t, chainID, ch.ChainID, "NetworkID should match")
 
 		// Find the corresponding original channel to compare with

@@ -177,7 +177,7 @@ func (c *Custody) handleBlockChainEvent(l types.Log) {
 			return
 		}
 
-		log.Printf("[ChannelCreated] Successfully initiated join for channel %s on network %s", channelID, c.chainID)
+		log.Printf("[ChannelCreated] Successfully initiated join for channel %s on chain %d", channelID, c.chainID)
 
 	case custodyAbi.Events["Joined"].ID:
 		ev, err := c.custody.ParseJoined(l)

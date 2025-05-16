@@ -412,8 +412,7 @@ func HandleCloseApplication(rpc *RPCRequest, db *gorm.DB) (*RPCResponse, error) 
 			return fmt.Errorf("quorum not met: %d / %d", totalWeight, appSession.Quorum)
 		}
 
-		sessionBal := map[string]decimal.Decimal{}
-
+		appSessionBalance := map[string]decimal.Decimal{}
 		for _, p := range appSession.Participants {
 			ledger := GetParticipantLedger(tx, p)
 			for asset := range assets {
@@ -421,7 +420,7 @@ func HandleCloseApplication(rpc *RPCRequest, db *gorm.DB) (*RPCResponse, error) 
 				if err != nil {
 					return fmt.Errorf("failed to read balance for %s:%s: %w", p, asset, err)
 				}
-				sessionBal[asset] = sessionBal[asset].Add(bal)
+				appSessionBalance[asset] = appSessionBalance[asset].Add(bal)
 			}
 		}
 
@@ -443,10 +442,6 @@ func HandleCloseApplication(rpc *RPCRequest, db *gorm.DB) (*RPCResponse, error) 
 			if err != nil {
 				return fmt.Errorf("failed to get participant balance: %w", err)
 			}
-			if !balance.Equal(alloc.Amount) {
-				return fmt.Errorf("allocation mismatch for %s in %s: expected %s, got %s",
-					alloc.Participant, alloc.AssetSymbol, balance, alloc.Amount)
-			}
 
 			// Debit session, credit participant
 			if err := ledger.Record(appSession.SessionID, alloc.AssetSymbol, balance.Neg()); err != nil {
@@ -464,20 +459,19 @@ func HandleCloseApplication(rpc *RPCRequest, db *gorm.DB) (*RPCResponse, error) 
 			return errors.New("allocations must be provided for every participant exactly once")
 		}
 
-		for asset, bal := range sessionBal {
+		for asset, bal := range appSessionBalance {
 			if alloc, ok := allocationSum[asset]; !ok || !bal.Equal(alloc) {
 				return fmt.Errorf("asset %s not fully redistributed", asset)
 			}
 		}
 		for asset := range allocationSum {
-			if _, ok := sessionBal[asset]; !ok {
+			if _, ok := appSessionBalance[asset]; !ok {
 				return fmt.Errorf("allocation references unknown asset %s", asset)
 			}
 		}
 
 		return tx.Model(&appSession).Updates(map[string]any{
-			"status":     ChannelStatusClosed,
-			"updated_at": time.Now(),
+			"status": ChannelStatusClosed,
 		}).Error
 	})
 
