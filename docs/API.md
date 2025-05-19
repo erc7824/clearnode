@@ -213,9 +213,7 @@ Retrieves all RPC messages history for a participant, ordered by timestamp (newe
 
 ```json
 {
-  "req": [4, "get_rpc_history", [{
-    "participant": "0x1234567890abcdef..."
-  }], 1619123456789],
+  "req": [4, "get_rpc_history", [], 1619123456789],
   "sig": ["0x9876fedcba..."]
 }
 ```
