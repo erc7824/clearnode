@@ -334,7 +334,7 @@ func TestHandleListParticipants(t *testing.T) {
 
 	// Create RPC request with token address parameter
 	params := map[string]string{
-		"account_id": "0xParticipant1",
+		"participant": "0xParticipant1",
 	}
 	paramsJSON, err := json.Marshal(params)
 	require.NoError(t, err)

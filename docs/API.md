@@ -123,7 +123,7 @@ Retrieves the balances of all participants in a specific ledger account.
 ```json
 {
   "req": [1, "get_ledger_balances", [{
-    "account_id": "0x1234567890abcdef..."
+    "participant": "0x1234567890abcdef..."
   }], 1619123456789],
   "sig": ["0x9876fedcba..."]
 }

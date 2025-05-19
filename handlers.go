@@ -214,20 +214,20 @@ func HandlePing(rpc *RPCMessage) (*RPCMessage, error) {
 
 // HandleGetLedgerBalances returns a list of participants and their balances for a ledger account
 func HandleGetLedgerBalances(rpc *RPCMessage, address string, db *gorm.DB) (*RPCMessage, error) {
-	var accountID string
+	var participantAccount string
 
 	if len(rpc.Req.Params) > 0 {
 		paramsJSON, err := json.Marshal(rpc.Req.Params[0])
 		if err == nil {
 			var params map[string]string
 			if err := json.Unmarshal(paramsJSON, &params); err == nil {
-				accountID = params["account_id"]
+				participantAccount = params["participant"]
 			}
 		}
 	}
 
 	ledger := GetParticipantLedger(db, address)
-	balances, err := ledger.GetBalances(accountID)
+	balances, err := ledger.GetBalances(participantAccount)
 	if err != nil {
 		return nil, fmt.Errorf("failed to find account: %w", err)
 	}
