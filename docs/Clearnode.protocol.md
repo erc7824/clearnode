@@ -85,10 +85,12 @@ All messages exchanged between clients and clearnodes follow this standardized f
 ```json
 {
   "req": [REQUEST_ID, METHOD, [PARAMETERS], TIMESTAMP],
+  "sid": "APP_SESSION_ID", // AppId for Virtual Ledgers for Internal Communication
   "sig": ["SIGNATURE"]  // Client's signature of the entire "req" object
 }
 ```
 
+- The `sid` field serves as both the subject and destination pubsub topic for the message. There is a one-to-one mapping between topics and ledger accounts.
 - The `sig` field contains one or more signatures, of the `req` data.
 
 ### Response Message
@@ -182,7 +184,7 @@ When an error occurs, the server responds with an error message:
 
 ```json
 {
-  "res": [REQUEST_ID, "res", "error", [{
+  "res": [REQUEST_ID, "error", [{
     "error": "Error message describing what went wrong"
   }], TIMESTAMP],
   "sig": ["SIGNATURE"]
