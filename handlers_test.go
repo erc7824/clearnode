@@ -697,8 +697,8 @@ func TestHandleGetRPCHistory(t *testing.T) {
 	}
 	require.NoError(t, db.Create(&otherRecord).Error)
 
-	rpcRequest := &RPCRequest{
-		Req: RPCData{
+	rpcRequest := &RPCMessage{
+		Req: &RPCData{
 			RequestID: 100,
 			Method:    "get_rpc_history",
 			Params:    []any{},
@@ -729,8 +729,8 @@ func TestHandleGetRPCHistory(t *testing.T) {
 	assert.Equal(t, uint64(2), rpcHistory[1].ReqID, "Second record should be the middle one")
 	assert.Equal(t, uint64(1), rpcHistory[2].ReqID, "Third record should be the oldest")
 
-	missingParamReq := &RPCRequest{
-		Req: RPCData{
+	missingParamReq := &RPCMessage{
+		Req: &RPCData{
 			RequestID: 789,
 			Method:    "get_rpc_history",
 			Params:    []any{},

@@ -873,7 +873,7 @@ func HandleGetChannels(rpc *RPCMessage, db *gorm.DB) (*RPCMessage, error) {
 	return rpcResponse, nil
 }
 
-func HandleGetRPCHistory(participant string, rpc *RPCRequest, store *RPCStore) (*RPCResponse, error) {
+func HandleGetRPCHistory(participant string, rpc *RPCMessage, store *RPCStore) (*RPCMessage, error) {
 	if participant == "" {
 		return nil, errors.New("missing participant parameter")
 	}

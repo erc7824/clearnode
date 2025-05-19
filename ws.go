@@ -292,10 +292,10 @@ func (h *UnifiedWSHandler) HandleConnection(w http.ResponseWriter, r *http.Reque
 				continue
 			}
 		case "get_rpc_history":
-			rpcResponse, handlerErr = HandleGetRPCHistory(address, &rpcRequest, h.rpcStore)
+			rpcResponse, handlerErr = HandleGetRPCHistory(address, &msg, h.rpcStore)
 			if handlerErr != nil {
 				log.Printf("Error handling get_rpc_history: %v", handlerErr)
-				h.sendErrorResponse(address, &rpcRequest.Req, rpcRequest.Sig, conn, "Failed to get RPC history: "+handlerErr.Error())
+				h.sendErrorResponse(address, &msg, conn, "Failed to get RPC history: "+handlerErr.Error())
 				continue
 			}
 
