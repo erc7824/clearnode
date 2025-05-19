@@ -118,7 +118,7 @@ func setupTestDB(t testing.TB) (*gorm.DB, func()) {
 func TestHandlePing(t *testing.T) {
 	// Test case 1: Simple ping with no parameters
 	rpcRequest1 := &RPCMessage{
-		Data: RPCData{
+		Req: &RPCData{
 			RequestID: 1,
 			Method:    "ping",
 			Params:    []any{nil},
@@ -131,7 +131,7 @@ func TestHandlePing(t *testing.T) {
 	require.NoError(t, err)
 	assert.NotNil(t, response1)
 
-	require.Equal(t, "pong", response1.Data.Method)
+	require.Equal(t, "pong", response1.Res.Method)
 }
 
 // TestHandleCloseVirtualApp tests the close virtual app handler functionality
@@ -189,7 +189,7 @@ func TestHandleCloseVirtualApp(t *testing.T) {
 	// Create RPC request
 	paramsJSON, _ := json.Marshal(closeParams)
 	req := &RPCMessage{
-		Data: RPCData{
+		Req: &RPCData{
 			RequestID: 1,
 			Method:    "close_app_session",
 			Params:    []any{json.RawMessage(paramsJSON)},
@@ -198,10 +198,10 @@ func TestHandleCloseVirtualApp(t *testing.T) {
 	}
 
 	signData := CloseAppSignData{
-		RequestID: req.Data.RequestID,
-		Method:    req.Data.Method,
+		RequestID: req.Req.RequestID,
+		Method:    req.Req.Method,
 		Params:    []CloseAppSessionParams{closeParams},
-		Timestamp: req.Data.Timestamp,
+		Timestamp: req.Req.Timestamp,
 	}
 	signBytes, _ := json.Marshal(signData)
 	sig, _ := signer.Sign(signBytes)
@@ -209,7 +209,7 @@ func TestHandleCloseVirtualApp(t *testing.T) {
 
 	resp, err := HandleCloseApplication(req, db)
 	require.NoError(t, err)
-	assert.Equal(t, "close_app_session", resp.Data.Method)
+	assert.Equal(t, "close_app_session", resp.Res.Method)
 	var updated AppSession
 	require.NoError(t, db.Where("session_id = ?", vAppID).First(&updated).Error)
 	assert.Equal(t, ChannelStatusClosed, updated.Status)
@@ -275,7 +275,7 @@ func TestHandleCreateVirtualApp(t *testing.T) {
 	}
 
 	rpcReq := &RPCMessage{
-		Data: RPCData{
+		Req: &RPCData{
 			RequestID: 42,
 			Method:    "create_app_session",
 			Params:    []any{createParams},
@@ -285,10 +285,10 @@ func TestHandleCreateVirtualApp(t *testing.T) {
 
 	// sign exactly like the handler
 	signData := CreateAppSignData{
-		RequestID: rpcReq.Data.RequestID,
-		Method:    rpcReq.Data.Method,
+		RequestID: rpcReq.Req.RequestID,
+		Method:    rpcReq.Req.Method,
 		Params:    []CreateAppSessionParams{createParams},
-		Timestamp: rpcReq.Data.Timestamp,
+		Timestamp: rpcReq.Req.Timestamp,
 	}
 	signBytes, _ := signData.MarshalJSON()
 	sigA, _ := signerA.Sign(signBytes)
@@ -299,8 +299,8 @@ func TestHandleCreateVirtualApp(t *testing.T) {
 	require.NoError(t, err)
 
 	// ► response sanity
-	assert.Equal(t, "create_app_session", resp.Data.Method)
-	appResp, ok := resp.Data.Params[0].(*AppSessionResponse)
+	assert.Equal(t, "create_app_session", resp.Res.Method)
+	appResp, ok := resp.Res.Params[0].(*AppSessionResponse)
 	require.True(t, ok)
 	assert.Equal(t, string(ChannelStatusOpen), appResp.Status)
 
@@ -340,7 +340,7 @@ func TestHandleListParticipants(t *testing.T) {
 	require.NoError(t, err)
 
 	rpcRequest := &RPCMessage{
-		Data: RPCData{
+		Req: &RPCData{
 			RequestID: 1,
 			Method:    "get_ledger_balances",
 			Params:    []any{json.RawMessage(paramsJSON)},
@@ -350,13 +350,13 @@ func TestHandleListParticipants(t *testing.T) {
 	}
 
 	// Use the test-specific handler instead of the actual one
-	response, err := HandleGetLedgerBalances(rpcRequest, "0xParticipant1", db)
+	msg, err := HandleGetLedgerBalances(rpcRequest, "0xParticipant1", db)
 	require.NoError(t, err)
-	assert.NotNil(t, response)
+	assert.NotNil(t, msg)
 
 	// Extract the response data
 	var responseParams []any
-	responseParams = response.Data.Params
+	responseParams = msg.Res.Params
 	require.NotEmpty(t, responseParams)
 
 	// First parameter should be an array of ChannelAvailabilityResponse
@@ -372,12 +372,12 @@ func TestHandleListParticipants(t *testing.T) {
 	}
 
 	for _, ch := range channelsArray {
-		expectedBalance, exists := expectedAssets[ch.AssetSymbol]
-		assert.True(t, exists, "Unexpected address in response: %s", ch.AssetSymbol)
-		assert.Equal(t, expectedBalance, ch.Amount, "Incorrect balance for address %s", ch.AssetSymbol)
+		expectedBalance, exists := expectedAssets[ch.Asset]
+		assert.True(t, exists, "Unexpected address in response: %s", ch.Asset)
+		assert.Equal(t, expectedBalance, ch.Amount, "Incorrect balance for address %s", ch.Asset)
 
 		// Remove from map to ensure each address appears only once
-		delete(expectedAssets, ch.AssetSymbol)
+		delete(expectedAssets, ch.Asset)
 	}
 
 	assert.Empty(t, expectedAssets, "Not all expected addresses were found in the response")
@@ -410,7 +410,7 @@ func TestHandleGetConfig(t *testing.T) {
 	}
 
 	rpcRequest := &RPCMessage{
-		Data: RPCData{
+		Req: &RPCData{
 			RequestID: 1,
 			Method:    "get_config",
 			Params:    []any{},
@@ -430,7 +430,7 @@ func TestHandleGetConfig(t *testing.T) {
 
 	// Extract the response data
 	var responseParams []any
-	responseParams = response.Data.Params
+	responseParams = response.Res.Params
 	require.NotEmpty(t, responseParams)
 
 	// First parameter should be a BrokerConfig
@@ -546,7 +546,7 @@ func TestHandleGetChannels(t *testing.T) {
 	require.NoError(t, err)
 
 	rpcRequest := &RPCMessage{
-		Data: RPCData{
+		Req: &RPCData{
 			RequestID: 123,
 			Method:    "get_channels",
 			Params:    []any{json.RawMessage(paramsJSON)},
@@ -554,7 +554,7 @@ func TestHandleGetChannels(t *testing.T) {
 		},
 	}
 
-	reqBytes, err := json.Marshal(rpcRequest.Data)
+	reqBytes, err := json.Marshal(rpcRequest.Req)
 	require.NoError(t, err)
 	signed, err := signer.Sign(reqBytes)
 	require.NoError(t, err)
@@ -564,11 +564,11 @@ func TestHandleGetChannels(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, response)
 
-	assert.Equal(t, "get_channels", response.Data.Method)
-	assert.Equal(t, uint64(123), response.Data.RequestID)
+	assert.Equal(t, "get_channels", response.Res.Method)
+	assert.Equal(t, uint64(123), response.Res.RequestID)
 
-	require.Len(t, response.Data.Params, 1, "Response should contain a slice of ChannelResponse")
-	channelsSlice, ok := response.Data.Params[0].([]ChannelResponse)
+	require.Len(t, response.Res.Params, 1, "Response should contain a slice of ChannelResponse")
+	channelsSlice, ok := response.Res.Params[0].([]ChannelResponse)
 	require.True(t, ok, "Response parameter should be a slice of ChannelResponse")
 
 	// Should return all 3 channels for the participant
@@ -607,7 +607,7 @@ func TestHandleGetChannels(t *testing.T) {
 
 	// Test with invalid signature
 	invalidReq := &RPCMessage{
-		Data: RPCData{
+		Req: &RPCData{
 			RequestID: 456,
 			Method:    "get_channels",
 			Params:    []any{json.RawMessage(paramsJSON)},
@@ -622,7 +622,7 @@ func TestHandleGetChannels(t *testing.T) {
 
 	// Test with missing participant parameter
 	missingParamReq := &RPCMessage{
-		Data: RPCData{
+		Req: &RPCData{
 			RequestID: 789,
 			Method:    "get_channels",
 			Params:    []any{map[string]string{}}, // Empty map

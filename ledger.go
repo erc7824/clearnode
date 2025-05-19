@@ -69,11 +69,6 @@ func (l *ParticipantLedger) Balance(accountID string, assetSymbol string) (decim
 	return res.Balance, nil
 }
 
-type Balance struct {
-	AssetSymbol string          `json:"asset_symbol"`
-	Amount      decimal.Decimal `json:"amount"`
-}
-
 func (l *ParticipantLedger) GetBalances(accountID string) ([]Balance, error) {
 	type row struct {
 		Asset   string          `gorm:"column:asset_symbol"`
@@ -93,8 +88,8 @@ func (l *ParticipantLedger) GetBalances(accountID string) ([]Balance, error) {
 	balances := make([]Balance, len(rows))
 	for i, r := range rows {
 		balances[i] = Balance{
-			AssetSymbol: r.Asset,
-			Amount:      r.Balance,
+			Asset:  r.Asset,
+			Amount: r.Balance,
 		}
 	}
 	return balances, nil

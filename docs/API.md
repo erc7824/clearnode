@@ -18,38 +18,6 @@
 | `close_channel` | Closes a payment channel |
 | `resize_channel` | Adjusts channel capacity |
 
-## RPC Message Format
-
-All communication uses a consistent JSON format. Each message contains:
-
-1. A data array `[request_id, type, method, params, timestamp]`
-2. A signature array with signatures from involved parties
-
-### Request Format
-
-```json
-{
-  "data": [id, "req", "method_name", [params], 1619123456789],
-  "sig": ["0x5432abcdef..."]
-}
-```
-
-### Response Format
-
-```json
-{
-  "data": [id, "res", "method_name", [result], 1619123456789],
-  "sig": ["0x9876fedcba..."]
-}
-```
-
-- `id`: A unique identifier for the request/response pair (uint64)
-- `type`: Request `req` or response `res` (string).
-- `method`: The RPC method name (string)
-- `params`: Array of method parameters or results
-- `timestamp`: Unix timestamp in milliseconds (uint64)
-- `sig`: Array of signatures from the participants or the broker
-
 ## Authentication
 
 ### Authentication Request
@@ -60,7 +28,7 @@ Initiates authentication with the server.
 
 ```json
 {
-  "data": [1, "req", "auth_request", ["0x1234567890abcdef..."], 1619123456789],
+  "req": [1, "auth_request", ["0x1234567890abcdef..."], 1619123456789],
   "sig": ["0x5432abcdef..."] // Client's signature of the entire 'req' object
 }
 ```
@@ -73,7 +41,7 @@ Server response with a challenge token for the client to sign.
 
 ```json
 {
-  "data": [1, "res", "auth_challenge", [{
+  "res": [1, "auth_challenge", [{
     "challenge_message": "550e8400-e29b-41d4-a716-446655440000"
   }], 1619123456789],
   "sig": ["0x9876fedcba..."] // Server's signature of the entire 'res' object
@@ -88,7 +56,7 @@ Completes authentication with a challenge response.
 
 ```json
 {
-  "data": [2, "req", "auth_verify", [{
+  "req": [2, "auth_verify", [{
     "address": "0x1234567890abcdef...",
     "challenge": "550e8400-e29b-41d4-a716-446655440000"
   }], 1619123456789],
@@ -100,7 +68,7 @@ Completes authentication with a challenge response.
 
 ```json
 {
-  "data": [2, "res", "auth_verify", [{
+  "res": [2, "auth_verify", [{
     "address": "0x1234567890abcdef...",
     "success": true
   }], 1619123456789],
@@ -118,7 +86,7 @@ Retrieves the application definition for a specific ledger account.
 
 ```json
 {
-  "data": [1, "req", "get_app_definition", [{
+  "req": [1, "get_app_definition", [{
     "app_session_id": "0x1234567890abcdef..."
   }], 1619123456789],
   "sig": ["0x9876fedcba..."]
@@ -129,7 +97,7 @@ Retrieves the application definition for a specific ledger account.
 
 ```json
 {
-  "data": [1, "res", "get_app_definition", [
+  "res": [1, "get_app_definition", [
     {
       "protocol": "NitroRPC/0.2",
       "participants": [
@@ -154,7 +122,7 @@ Retrieves the balances of all participants in a specific ledger account.
 
 ```json
 {
-  "data": [1, "req", "get_ledger_balances", [{
+  "req": [1, "get_ledger_balances", [{
     "account_id": "0x1234567890abcdef..."
   }], 1619123456789],
   "sig": ["0x9876fedcba..."]
@@ -165,13 +133,13 @@ Retrieves the balances of all participants in a specific ledger account.
 
 ```json
 {
-  "data": [1, "res", "get_ledger_balances", [[
+  "res": [1, "get_ledger_balances", [[
     {
-      "asset_symbol": "usdc",
+      "asset": "usdc",
       "amount": "100.0"
     },
     {
-      "asset_symbol": "eth",
+      "asset": "eth",
       "amount": "0.5"
     }
   ]], 1619123456789],
@@ -187,7 +155,7 @@ Retrieves all channels for a participant (both open, closed, and joining), order
 
 ```json
 {
-  "data": [1, "req", "get_channels", [{
+  "req": [1, "get_channels", [{
     "participant": "0x1234567890abcdef..."
   }], 1619123456789],
   "sig": ["0x9876fedcba..."]
@@ -198,7 +166,7 @@ Retrieves all channels for a participant (both open, closed, and joining), order
 
 ```json
 {
-  "data": [1, "res", "get_channels", [[
+  "res": [1, "get_channels", [[
     {
       "channel_id": "0xfedcba9876543210...",
       "participant": "0x1234567890abcdef...",
@@ -303,7 +271,7 @@ Creates a virtual application between participants.
 
 ```json
 {
-  "data": [1, "req", "create_app_session", [{
+  "req": [1, "create_app_session", [{
     "definition": {
       "protocol": "NitroRPC/0.2",
       "participants": [
@@ -318,12 +286,12 @@ Creates a virtual application between participants.
     "allocations": [
       {
         "participant": "0xAaBbCcDdEeFf0011223344556677889900aAbBcC",
-        "asset_symbol": "usdc",
+        "asset": "usdc",
         "amount": "100.0"
       },
       {
         "participant": "0x00112233445566778899AaBbCcDdEeFf00112233",
-        "asset_symbol": "usdc", 
+        "asset": "usdc", 
         "amount": "100.0"
       }
     ]
@@ -336,7 +304,7 @@ Creates a virtual application between participants.
 
 ```json
 {
-  "data": [1, "res", "create_app_session", [{
+  "res": [1, "create_app_session", [{
     "app_session_id": "0x3456789012abcdef...",
     "status": "open"
   }], 1619123456789],
@@ -352,17 +320,17 @@ Closes a virtual application and redistributes funds.
 
 ```json
 {
-  "data": [1, "req", "close_app_session", [{
+  "req": [1, "close_app_session", [{
     "app_session_id": "0x3456789012abcdef...",
     "allocations": [
       {
         "participant": "0xAaBbCcDdEeFf0011223344556677889900aAbBcC",
-        "asset_symbol": "usdc",
+        "asset": "usdc",
         "amount": "0.0"
       },
       {
         "participant": "0x00112233445566778899AaBbCcDdEeFf00112233",
-        "asset_symbol": "usdc",
+        "asset": "usdc",
         "amount": "200.0"
       }
     ]
@@ -375,7 +343,7 @@ Closes a virtual application and redistributes funds.
 
 ```json
 {
-  "data": [1, "res", "close_app_session", [{
+  "res": [1, "close_app_session", [{
     "app_session_id": "0x3456789012abcdef...",
     "status": "closed"
   }], 1619123456789],
@@ -391,7 +359,7 @@ Closes a channel between a participant and the broker.
 
 ```json
 {
-  "data": [1, "req", "close_channel", [{
+  "req": [1, "close_channel", [{
     "channel_id": "0x4567890123abcdef...",
     "funds_destination": "0x1234567890abcdef..."
   }], 1619123456789],
@@ -403,7 +371,7 @@ Closes a channel between a participant and the broker.
 
 ```json
 {
-  "data": [1, "res", "close_channel", [{
+  "res": [1, "close_channel", [{
     "channel_id": "0x4567890123abcdef...",
     "intent": 1,
     "version": 123,
@@ -439,20 +407,29 @@ Adjusts the capacity of a channel.
 
 ```json
 {
-  "data": [1, "req", "resize_channel", [{
+  "req": [1, "resize_channel", [{
     "channel_id": "0x4567890123abcdef...",
-    "new_amount": "100.0",
+    "allocate_amount": "20.0",
+    "resize_amount": "100.0",
     "funds_destination": "0x1234567890abcdef..."
   }], 1619123456789],
   "sig": ["0x9876fedcba..."]
 }
 ```
 
+`allocate_amount` is how much more token user wants to allocate to this token-network specific channel from his unified balance.
+`resize_amount` is how much user wants to deposit or withdraw from a token-network speecific channel.
+
+- Initial state: user an open channel on Polygon with 20 usdc, and a channel on Celo with 5 usdc.
+- User wants to deposit 75 usdc on Celo. User calls `resize_channel`, with `allocate_amount=0` and `resize_amount=-100`.
+- Now user has his unified balance at 100 usdc (20 on Polygon and 80 on Celo).
+- Now user wants wo withdraw all 100 usdc on Polygon. To withdraw, user must allocate 80 on this specific channel (`allocate_amount=80`), and resize it (`resize_amount=-100`). Also it is recommended to deallocate the channel on Celo (optional, but we may make this required in the future).
+
 **Response:**
 
 ```json
 {
-  "data": [1, "res", "resize_channel", [{
+  "res": [1, "resize_channel", [{
     "channel_id": "0x4567890123abcdef...",
     "state_data": "0x0000000000000000000000000000000000000000000000000000000000002ec7",
     "intent": 2,
@@ -492,7 +469,7 @@ Simple ping to check connectivity.
 
 ```json
 {
-  "data": [1, "req", "ping", [], 1619123456789],
+  "req": [1, "ping", [], 1619123456789],
   "sig": ["0x9876fedcba..."]
 }
 ```
@@ -501,7 +478,7 @@ Simple ping to check connectivity.
 
 ```json
 {
-  "data": [1, "res", "pong", [], 1619123456789],
+  "res": [1, "pong", [], 1619123456789],
   "sig": ["0xabcd1234..."]
 }
 ```
@@ -514,7 +491,7 @@ Retrieves broker configuration information including supported networks.
 
 ```json
 {
-  "data": [1, "req", "get_config", [], 1619123456789],
+  "req": [1, "get_config", [], 1619123456789],
   "sig": ["0x9876fedcba..."]
 }
 ```
@@ -523,7 +500,7 @@ Retrieves broker configuration information including supported networks.
 
 ```json
 {
-  "data": [1, "res", "get_config", [{
+  "res": [1, "get_config", [{
     "broker_address": "0xbbbb567890abcdef...",
     "networks": [
       {
@@ -553,7 +530,7 @@ When an error occurs, the server responds with an error message:
 
 ```json
 {
-  "data": [REQUEST_ID, "res", "error", [{
+  "res": [REQUEST_ID, "res", "error", [{
     "error": "Error message describing what went wrong"
   }], 1619123456789],
   "sig": ["0xabcd1234..."]

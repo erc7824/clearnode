@@ -80,22 +80,34 @@ The Clearnode protocol is a system for managing payment channels and virtual app
 
 All messages exchanged between clients and clearnodes follow this standardized format:
 
-### Message Structure
+### Request Message
 
 ```json
 {
-  "data": [REQUEST_ID, TYPE, METHOD, [PARAMETERS], TIMESTAMP],
-  "sig": ["SIGNATURE"]  // Client's signature of the entire "data" object
+  "req": [REQUEST_ID, METHOD, [PARAMETERS], TIMESTAMP],
+  "sig": ["SIGNATURE"]  // Client's signature of the entire "req" object
 }
 ```
 
-- The `sig` field contains one or more signatures, ensuring proof-of-history integrity.
+- The `sig` field contains one or more signatures, of the `req` data.
+
+### Response Message
+
+```json
+{
+  "res": [REQUEST_ID, METHOD, [RESPONSE_DATA], TIMESTAMP],
+  "acc": "ACCOUNT_ID", // AppId for Virtual Ledgers for Internal Communication
+  "int": [INTENT],// Allocation intent change
+  "sig": ["SIGNATURE"]
+}
+```
+
+- The `sig` field contains one or more signatures, of the `res` data.
 
 
 The structure breakdown:
 
 - `REQUEST_ID`: A unique identifier for the request/response pair (`uint64`)
-- `TYPE`: Request `req` or response `res` type (`string`)
 - `METHOD`: The name of the method being called (`string`)
 - `PARAMETERS`/`RESPONSE_DATA`: An array of parameters/response data (`[]any`)
 - `TIMESTAMP`: Unix timestamp of the request/response in milliseconds (`uint64`)

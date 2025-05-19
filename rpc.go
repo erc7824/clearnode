@@ -7,24 +7,17 @@ import (
 	"time"
 )
 
-type RPCType string
-
-const (
-	RPCTypeRequest  RPCType = "req"
-	RPCTypeResponse RPCType = "res"
-)
-
 // RPCMessage represents a complete message in the RPC protocol, including data and signatures
 type RPCMessage struct {
-	Data RPCData  `json:"data"`
-	Sig  []string `json:"sig"`
+	Req *RPCData `json:"req,omitempty" validate:"required_without=Res"`
+	Res *RPCData `json:"res,omitempty" validate:"required_without=Req"`
+	Sig []string `json:"sig"`
 }
 
 // RPCData represents the common structure for both requests and responses
-// Format: [request_id, type, method, params, ts]
+// Format: [request_id, method, params, ts]
 type RPCData struct {
 	RequestID uint64
-	Type      RPCType
 	Method    string
 	Params    []any
 	Timestamp uint64
@@ -42,9 +35,8 @@ func ParseRPCMessage(data []byte) (*RPCMessage, error) {
 // CreateResponse creates a response from a request with the given fields
 func CreateResponse(id uint64, method string, responseParams []any, newTimestamp time.Time) *RPCMessage {
 	return &RPCMessage{
-		Data: RPCData{
+		Res: &RPCData{
 			RequestID: id,
-			Type:      RPCTypeResponse,
 			Method:    method,
 			Params:    responseParams,
 			Timestamp: uint64(newTimestamp.Unix()),
@@ -73,24 +65,19 @@ func (m *RPCData) UnmarshalJSON(data []byte) error {
 	}
 	m.RequestID = uint64(requestID)
 
-	// Parse Type (string)
-	if err := json.Unmarshal(rawMsg[1], &m.Type); err != nil {
-		return fmt.Errorf("invalid type: %w", err)
-	}
-
 	// Parse Method (string)
-	if err := json.Unmarshal(rawMsg[2], &m.Method); err != nil {
+	if err := json.Unmarshal(rawMsg[1], &m.Method); err != nil {
 		return fmt.Errorf("invalid method: %w", err)
 	}
 
 	// Parse Params ([]any)
-	if err := json.Unmarshal(rawMsg[3], &m.Params); err != nil {
+	if err := json.Unmarshal(rawMsg[2], &m.Params); err != nil {
 		return fmt.Errorf("invalid params: %w", err)
 	}
 
 	// Parse Timestamp (uint64)
 	var timestamp uint64
-	if err := json.Unmarshal(rawMsg[4], &timestamp); err != nil {
+	if err := json.Unmarshal(rawMsg[3], &timestamp); err != nil {
 		return fmt.Errorf("invalid timestamp: %w", err)
 	}
 	m.Timestamp = uint64(timestamp)
@@ -103,7 +90,6 @@ func (m RPCData) MarshalJSON() ([]byte, error) {
 	// Create array representation
 	return json.Marshal([]any{
 		m.RequestID,
-		m.Type,
 		m.Method,
 		m.Params,
 		m.Timestamp,
