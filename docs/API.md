@@ -516,6 +516,33 @@ Simple ping to check connectivity.
 }
 ```
 
+### Balance Updates
+
+The server automatically sends balance updates to clients in these scenarios:
+1. After successful authentication (as a welcome message)
+2. After channel operations (open, close, resize)
+3. After application operations (create, close)
+
+Balance updates are sent as unsolicited server messages with the "bu" method:
+
+```json
+{
+  "res": [1234567890123, "bu", [[
+    {
+      "asset": "usdc",
+      "amount": "100.0"
+    },
+    {
+      "asset": "eth",
+      "amount": "0.5"
+    }
+  ]], 1619123456789],
+  "sig": ["0xabcd1234..."]
+}
+```
+
+The balance update provides the latest balances for all assets in the participant's unified ledger, allowing clients to maintain an up-to-date view of available funds without explicitly requesting them.
+
 ### Get Configuration
 
 Retrieves broker configuration information including supported networks.
