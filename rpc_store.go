@@ -10,13 +10,13 @@ import (
 // RPCRecord represents an RPC message in the database
 type RPCRecord struct {
 	ID        uint           `gorm:"primaryKey"`
-	Sender    string         `gorm:"column:sender_address;type:varchar(255);not null"`
+	Sender    string         `gorm:"column:sender;type:varchar(255);not null"`
 	ReqID     uint64         `gorm:"column:req_id;not null"`
 	Method    string         `gorm:"column:method;type:varchar(255);not null"`
 	Params    []byte         `gorm:"column:params;type:text;not null"`
 	Timestamp uint64         `gorm:"column:timestamp;not null"`
 	ReqSig    pq.StringArray `gorm:"type:text[];column:req_sig;"`
-	Response  []byte         `gorm:"column:result;type:text;not null"`
+	Response  []byte         `gorm:"column:response;type:text;not null"`
 	ResSig    pq.StringArray `gorm:"type:text[];column:res_sig;"`
 }
 

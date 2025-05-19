@@ -227,24 +227,24 @@ Retrieves all RPC messages history for a participant, ordered by timestamp (newe
   "res": [4, "get_rpc_history", [[
     {
       "id": 123,
-      "sender_address": "0x1234567890abcdef...",
+      "sender": "0x1234567890abcdef...",
       "req_id": 42,
       "method": "get_channels",
       "params": "[{\"participant\":\"0x1234567890abcdef...\"}]",
       "timestamp": 1619123456789,
       "req_sig": ["0x9876fedcba..."],
-      "result": "{\"res\":[42,\"get_channels\",[[...]],1619123456799]}",
+      "response": "{\"res\":[42,\"get_channels\",[[...]],1619123456799]}",
       "res_sig": ["0xabcd1234..."]
     },
     {
       "id": 122,
-      "sender_address": "0x1234567890abcdef...",
+      "sender": "0x1234567890abcdef...",
       "req_id": 41,
       "method": "ping",
       "params": "[null]",
       "timestamp": 1619123446789,
       "req_sig": ["0x8765fedcba..."],
-      "result": "{\"res\":[41,\"pong\",[],1619123446799]}",
+      "response": "{\"res\":[41,\"pong\",[],1619123446799]}",
       "res_sig": ["0xdcba4321..."]
     }
   ]], 1619123456789],

@@ -767,17 +767,11 @@ func TestHandleGetRPCHistory(t *testing.T) {
 	}
 	require.NoError(t, db.Create(&otherRecord).Error)
 
-	params := map[string]string{
-		"participant": participantAddr,
-	}
-	paramsJSON, err := json.Marshal(params)
-	require.NoError(t, err)
-
 	rpcRequest := &RPCRequest{
 		Req: RPCData{
 			RequestID: 100,
 			Method:    "get_rpc_history",
-			Params:    []any{json.RawMessage(paramsJSON)},
+			Params:    []any{},
 			Timestamp: timestamp,
 		},
 	}
@@ -788,16 +782,16 @@ func TestHandleGetRPCHistory(t *testing.T) {
 	require.NoError(t, err)
 	rpcRequest.Sig = []string{hexutil.Encode(signed)}
 
-	response, err := HandleGetRPCHistory(rpcRequest, rpcStore)
+	response, err := HandleGetRPCHistory(participantAddr, rpcRequest, rpcStore)
 	require.NoError(t, err)
 	require.NotNil(t, response)
 
 	assert.Equal(t, "get_rpc_history", response.Res.Method)
 	assert.Equal(t, uint64(100), response.Res.RequestID)
 
-	require.Len(t, response.Res.Params, 1, "Response should contain a slice of RPCRecord")
-	rpcHistory, ok := response.Res.Params[0].([]RPCRecord)
-	require.True(t, ok, "Response parameter should be a slice of RPCRecord")
+	require.Len(t, response.Res.Params, 1, "Response should contain a RPCHistoryResponse")
+	rpcHistory, ok := response.Res.Params[0].([]RPCEntry)
+	require.True(t, ok, "Response parameter should be a RPCHistoryResponse")
 
 	assert.Len(t, rpcHistory, 3, "Should return 3 records for the participant")
 
@@ -805,31 +799,17 @@ func TestHandleGetRPCHistory(t *testing.T) {
 	assert.Equal(t, uint64(2), rpcHistory[1].ReqID, "Second record should be the middle one")
 	assert.Equal(t, uint64(1), rpcHistory[2].ReqID, "Third record should be the oldest")
 
-	invalidReq := &RPCRequest{
-		Req: RPCData{
-			RequestID: 456,
-			Method:    "get_rpc_history",
-			Params:    []any{json.RawMessage(paramsJSON)},
-			Timestamp: uint64(time.Now().Unix()),
-		},
-		Sig: []string{"0xInvalidSignature"},
-	}
-
-	_, err = HandleGetRPCHistory(invalidReq, rpcStore)
-	assert.Error(t, err, "Should return error with invalid signature")
-	assert.Contains(t, err.Error(), "invalid signature", "Error should mention invalid signature")
-
 	missingParamReq := &RPCRequest{
 		Req: RPCData{
 			RequestID: 789,
 			Method:    "get_rpc_history",
-			Params:    []any{map[string]string{}}, // Empty map
+			Params:    []any{},
 			Timestamp: uint64(time.Now().Unix()),
 		},
 		Sig: []string{hexutil.Encode(signed)},
 	}
 
-	_, err = HandleGetRPCHistory(missingParamReq, rpcStore)
+	_, err = HandleGetRPCHistory("", missingParamReq, rpcStore)
 	assert.Error(t, err, "Should return error with missing participant")
 	assert.Contains(t, err.Error(), "missing participant", "Error should mention missing participant")
 }

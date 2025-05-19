@@ -154,6 +154,19 @@ type BrokerConfig struct {
 	BrokerAddress string `json:"brokerAddress"`
 }
 
+// RPCEntry represents an RPC record from history.
+type RPCEntry struct {
+	ID        uint     `json:"id"`
+	Sender    string   `json:"sender"`
+	ReqID     uint64   `json:"req_id"`
+	Method    string   `json:"method"`
+	Params    string   `json:"params"`
+	Timestamp uint64   `json:"timestamp"`
+	ReqSig    []string `json:"req_sig"`
+	Result    string   `json:"response"`
+	ResSig    []string `json:"res_sig"`
+}
+
 // HandleGetConfig returns the broker configuration
 func HandleGetConfig(rpc *RPCRequest) (*RPCResponse, error) {
 	config := BrokerConfig{
@@ -796,47 +809,31 @@ func HandleGetChannels(rpc *RPCRequest, ledger *Ledger) (*RPCResponse, error) {
 	return rpcResponse, nil
 }
 
-func HandleGetRPCHistory(rpc *RPCRequest, store *RPCStore) (*RPCResponse, error) {
-	var participant string
-
-	if len(rpc.Req.Params) > 0 {
-		paramsJSON, err := json.Marshal(rpc.Req.Params[0])
-		if err == nil {
-			var params map[string]string
-			if err := json.Unmarshal(paramsJSON, &params); err == nil {
-				participant = params["participant"]
-			}
-		}
-	}
-
+func HandleGetRPCHistory(participant string, rpc *RPCRequest, store *RPCStore) (*RPCResponse, error) {
 	if participant == "" {
 		return nil, errors.New("missing participant parameter")
 	}
 
-	reqBytes, err := json.Marshal(rpc.Req)
-	if err != nil {
-		return nil, errors.New("error serializing message")
-	}
-
-	isValid, err := ValidateSignature(reqBytes, rpc.Sig[0], participant)
-	if err != nil || !isValid {
-		return nil, errors.New("invalid signature")
-	}
-
 	var rpcHistory []RPCRecord
-	err = store.db.Transaction(func(tx *gorm.DB) error {
-		var requests []RPCRecord
-		if err := tx.Where("sender_address = ?", participant).Order("timestamp DESC").Find(&requests).Error; err != nil {
-			return fmt.Errorf("failed to get RPC history: %w", err)
-		}
-		for _, req := range requests {
-			rpcHistory = append(rpcHistory, req)
-		}
-		return nil
-	})
-	if err != nil {
+	if err := store.db.Where("sender = ?", participant).Order("timestamp DESC").Find(&rpcHistory).Error; err != nil {
 		return nil, fmt.Errorf("failed to retrieve RPC history: %w", err)
 	}
-	rpcResponse := CreateResponse(rpc.Req.RequestID, rpc.Req.Method, []any{rpcHistory}, time.Now())
+
+	response := make([]RPCEntry, 0, len(rpcHistory))
+	for _, record := range rpcHistory {
+		response = append(response, RPCEntry{
+			ID:        record.ID,
+			Sender:    record.Sender,
+			ReqID:     record.ReqID,
+			Method:    record.Method,
+			Params:    string(record.Params),
+			Timestamp: record.Timestamp,
+			ReqSig:    record.ReqSig,
+			ResSig:    record.ResSig,
+			Result:    string(record.Response),
+		})
+	}
+
+	rpcResponse := CreateResponse(rpc.Req.RequestID, rpc.Req.Method, []any{response}, time.Now())
 	return rpcResponse, nil
 }
