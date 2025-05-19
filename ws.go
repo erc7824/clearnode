@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"math/big"
 	"net/http"
 	"strings"
 	"sync"
@@ -151,7 +152,16 @@ func (h *UnifiedWSHandler) HandleConnection(w http.ResponseWriter, r *http.Reque
 
 	log.Printf("Participant authenticated: %s", address)
 
+	// Send initial balance and channels information in form of balance and channel updates
 	h.sendBalanceUpdate(address)
+	channels, err := getChannelsForParticipant(h.db, address)
+	if err != nil {
+		log.Printf("Error retrieving channels for participant %s: %v", address, err)
+	}
+
+	for _, channel := range channels {
+		h.sendChannelUpdate(channel)
+	}
 
 	for {
 		_, messageBytes, err := conn.ReadMessage()
@@ -498,6 +508,67 @@ func (h *UnifiedWSHandler) sendBalanceUpdate(sender string) {
 		log.Printf("Successfully forwarded message to %s", sender)
 	} else {
 		log.Printf("Recipient %s not connected", sender)
+		return
+	}
+}
+
+// sendErrorResponse creates and sends an error response to the client
+func (h *UnifiedWSHandler) sendChannelUpdate(channel Channel) {
+	response := CreateResponse(uint64(time.Now().UnixNano()), "cu", []any{
+		ChannelResponse{
+			ChannelID:   channel.ChannelID,
+			Participant: channel.Participant,
+			Status:      channel.Status,
+			Token:       channel.Token,
+			Amount:      big.NewInt(int64(channel.Amount)),
+			ChainID:     channel.ChainID,
+			Adjudicator: channel.Adjudicator,
+			Challenge:   channel.Challenge,
+			Nonce:       channel.Nonce,
+			Version:     channel.Version,
+			CreatedAt:   channel.CreatedAt.Format(time.RFC3339),
+			UpdatedAt:   channel.UpdatedAt.Format(time.RFC3339),
+		},
+	}, time.Now())
+
+	byteData, _ := json.Marshal(response.Req)
+	signature, _ := h.signer.Sign(byteData)
+	response.Sig = []string{hexutil.Encode(signature)}
+
+	responseData, err := json.Marshal(response)
+	if err != nil {
+		log.Printf("Error marshaling error response: %v", err)
+		return
+	}
+
+	h.connectionsMu.RLock()
+	recipientConn, exists := h.connections[channel.Participant]
+	h.connectionsMu.RUnlock()
+	if exists {
+		// Use NextWriter for safer message delivery
+		w, err := recipientConn.NextWriter(websocket.TextMessage)
+		if err != nil {
+			log.Printf("Error getting writer for balance update to %s: %v", channel.Participant, err)
+			return
+		}
+
+		if _, err := w.Write(responseData); err != nil {
+			log.Printf("Error writing balance update to %s: %v", channel.Participant, err)
+			w.Close()
+			return
+		}
+
+		if err := w.Close(); err != nil {
+			log.Printf("Error closing writer for balance update to %s: %v", channel.Participant, err)
+			return
+		}
+
+		// Increment sent message counter for each forwarded message
+		h.metrics.MessageSent.Inc()
+
+		log.Printf("Successfully forwarded message to %s", channel.Participant)
+	} else {
+		log.Printf("Recipient %s not connected", channel.Participant)
 		return
 	}
 }

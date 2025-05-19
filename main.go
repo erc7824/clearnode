@@ -40,7 +40,7 @@ func main() {
 	http.HandleFunc("/ws", unifiedWSHandler.HandleConnection)
 
 	for name, network := range config.networks {
-		client, err := NewCustody(signer, db, unifiedWSHandler.sendBalanceUpdate, network.InfuraURL, network.CustodyAddress, network.ChainID)
+		client, err := NewCustody(signer, db, unifiedWSHandler.sendBalanceUpdate, unifiedWSHandler.sendChannelUpdate, network.InfuraURL, network.CustodyAddress, network.ChainID)
 		if err != nil {
 			log.Printf("Warning: Failed to initialize %s blockchain client: %v", name, err)
 			continue

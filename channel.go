@@ -41,7 +41,7 @@ func (Channel) TableName() string {
 
 // CreateChannel creates a new channel in the database
 // For real channels, participantB is always the broker application
-func CreateChannel(tx *gorm.DB, channelID, participantA string, nonce uint64, adjudicator string, chainID uint32, tokenAddress string, amount uint64) error {
+func CreateChannel(tx *gorm.DB, channelID, participantA string, nonce uint64, adjudicator string, chainID uint32, tokenAddress string, amount uint64) (Channel, error) {
 	channel := Channel{
 		ChannelID:   channelID,
 		Participant: participantA,
@@ -56,11 +56,11 @@ func CreateChannel(tx *gorm.DB, channelID, participantA string, nonce uint64, ad
 	}
 
 	if err := tx.Create(&channel).Error; err != nil {
-		return fmt.Errorf("failed to create channel: %w", err)
+		return Channel{}, fmt.Errorf("failed to create channel: %w", err)
 	}
 
 	log.Printf("Created new channel with ID: %s, chainID: %d", channelID, chainID)
-	return nil
+	return channel, nil
 }
 
 // GetChannelByID retrieves a channel by its ID

@@ -33,10 +33,11 @@ type Custody struct {
 	chainID           uint32
 	signer            *Signer
 	sendBalanceUpdate func(string)
+	sendChannelUpdate func(Channel)
 }
 
 // NewCustody initializes the Ethereum client and custody contract wrapper.
-func NewCustody(signer *Signer, db *gorm.DB, sendBalanceUpdate func(string), infuraURL, custodyAddressStr string, chain uint32) (*Custody, error) {
+func NewCustody(signer *Signer, db *gorm.DB, sendBalanceUpdate func(string), sendChannelUpdate func(Channel), infuraURL, custodyAddressStr string, chain uint32) (*Custody, error) {
 	custodyAddress := common.HexToAddress(custodyAddressStr)
 	client, err := ethclient.Dial(infuraURL)
 	if err != nil {
@@ -152,7 +153,7 @@ func (c *Custody) handleBlockChainEvent(l types.Log) {
 		}
 
 		channelID := common.BytesToHash(ev.ChannelId[:]).Hex()
-		err = CreateChannel(
+		ch, err := CreateChannel(
 			c.db,
 			channelID,
 			participantA,
@@ -178,6 +179,8 @@ func (c *Custody) handleBlockChainEvent(l types.Log) {
 			return
 		}
 
+		c.sendChannelUpdate(ch)
+
 		log.Printf("[ChannelCreated] Successfully initiated join for channel %s on chain %d", channelID, c.chainID)
 
 	case custodyAbi.Events["Joined"].ID:
@@ -188,7 +191,7 @@ func (c *Custody) handleBlockChainEvent(l types.Log) {
 		}
 		log.Printf("Joined event data: %+v\n", ev)
 
-		participant := ""
+		var channel Channel
 		channelID := common.BytesToHash(ev.ChannelId[:]).Hex()
 		err = c.db.Transaction(func(tx *gorm.DB) error {
 			var channel Channel
@@ -218,7 +221,7 @@ func (c *Custody) handleBlockChainEvent(l types.Log) {
 			}
 
 			tokenAmount := decimal.NewFromBigInt(big.NewInt(int64(channel.Amount)), -int32(asset.Decimals))
-			participant = channel.Participant
+
 			ledger := GetParticipantLedger(tx, channel.Participant)
 			if err := ledger.Record(channel.Participant, asset.Symbol, tokenAmount); err != nil {
 				log.Printf("[Closed] Error recording balance update for participant A: %v", err)
@@ -231,7 +234,8 @@ func (c *Custody) handleBlockChainEvent(l types.Log) {
 			log.Printf("[Joined] Error closing channel in database: %v", err)
 			return
 		}
-		c.sendBalanceUpdate(participant)
+		c.sendBalanceUpdate(channel.Participant)
+		c.sendChannelUpdate(channel)
 
 	case custodyAbi.Events["Closed"].ID:
 		ev, err := c.custody.ParseClosed(l)
@@ -241,10 +245,9 @@ func (c *Custody) handleBlockChainEvent(l types.Log) {
 		}
 		log.Printf("Closed event data: %+v\n", ev)
 
-		participant := ""
+		var channel Channel
 		channelID := common.BytesToHash(ev.ChannelId[:]).Hex()
 		err = c.db.Transaction(func(tx *gorm.DB) error {
-			var channel Channel
 			result := tx.Where("channel_id = ?", channelID).First(&channel)
 			if result.Error != nil {
 				if errors.Is(result.Error, gorm.ErrRecordNotFound) {
@@ -272,7 +275,6 @@ func (c *Custody) handleBlockChainEvent(l types.Log) {
 			}
 
 			tokenAmount := decimal.NewFromBigInt(big.NewInt(int64(channel.Amount)), -int32(asset.Decimals))
-			participant = channel.Participant
 			ledger := GetParticipantLedger(tx, channel.Participant)
 			if err := ledger.Record(channel.Participant, asset.Symbol, tokenAmount.Neg()); err != nil {
 				log.Printf("[Closed] Error recording balance update for participant A: %v", err)
@@ -287,7 +289,8 @@ func (c *Custody) handleBlockChainEvent(l types.Log) {
 			log.Printf("[Closed] Error closing channel in database: %v", err)
 			return
 		}
-		c.sendBalanceUpdate(participant)
+		c.sendBalanceUpdate(channel.Participant)
+		c.sendChannelUpdate(channel)
 
 	case custodyAbi.Events["Resized"].ID:
 		ev, err := c.custody.ParseResized(l)
@@ -319,7 +322,7 @@ func (c *Custody) handleBlockChainEvent(l types.Log) {
 			return
 		}
 
-		c.sendBalanceUpdate(channel.Participant)
+		c.sendChannelUpdate(channel)
 	default:
 		fmt.Println("Unknown event ID:", eventID.Hex())
 	}

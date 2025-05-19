@@ -543,6 +543,38 @@ Balance updates are sent as unsolicited server messages with the "bu" method:
 
 The balance update provides the latest balances for all assets in the participant's unified ledger, allowing clients to maintain an up-to-date view of available funds without explicitly requesting them.
 
+### Channel Updates
+
+The server automatically sends channel updates to clients in these scenarios:
+1. After successful authentication (for all existing channels)
+2. When a channel is created
+3. When a channel's status changes (open, joined, closed)
+4. When a channel is resized
+
+Channel updates are sent as unsolicited server messages with the "cu" method:
+
+```json
+{
+  "res": [1234567890123, "cu", [{
+    "channel_id": "0xfedcba9876543210...",
+    "participant": "0x1234567890abcdef...",
+    "status": "open",
+    "token": "0xeeee567890abcdef...",
+    "amount": "100000",
+    "chain_id": 137,
+    "adjudicator": "0xAdjudicatorContractAddress...",
+    "challenge": 86400,
+    "nonce": 1,
+    "version": 2,
+    "created_at": "2023-05-01T12:00:00Z",
+    "updated_at": "2023-05-01T12:30:00Z"
+  }], 1619123456789],
+  "sig": ["0xabcd1234..."]
+}
+```
+
+The channel update contains the complete current state of a specific channel, allowing clients to maintain an up-to-date view of their channels without explicitly requesting them through the `get_channels` method.
+
 ### Get Configuration
 
 Retrieves broker configuration information including supported networks.
