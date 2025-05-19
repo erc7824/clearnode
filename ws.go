@@ -151,6 +151,8 @@ func (h *UnifiedWSHandler) HandleConnection(w http.ResponseWriter, r *http.Reque
 
 	log.Printf("Participant authenticated: %s", address)
 
+	h.sendBalanceUpdate(address)
+
 	for {
 		_, messageBytes, err := conn.ReadMessage()
 		if err != nil {

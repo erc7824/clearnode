@@ -34,8 +34,13 @@ func main() {
 	// Map to store custody clients for later reference
 	custodyClients := make(map[string]*Custody)
 
+	go metrics.RecordMetricsPeriodically(db, custodyClients)
+
+	unifiedWSHandler := NewUnifiedWSHandler(signer, db, metrics, rpcStore, config)
+	http.HandleFunc("/ws", unifiedWSHandler.HandleConnection)
+
 	for name, network := range config.networks {
-		client, err := NewCustody(signer, db, network.InfuraURL, network.CustodyAddress, network.ChainID)
+		client, err := NewCustody(signer, db, unifiedWSHandler.sendBalanceUpdate, network.InfuraURL, network.CustodyAddress, network.ChainID)
 		if err != nil {
 			log.Printf("Warning: Failed to initialize %s blockchain client: %v", name, err)
 			continue
@@ -43,11 +48,6 @@ func main() {
 		custodyClients[name] = client
 		go client.ListenEvents(context.Background())
 	}
-
-	go metrics.RecordMetricsPeriodically(db, custodyClients)
-
-	unifiedWSHandler := NewUnifiedWSHandler(signer, db, metrics, rpcStore, config)
-	http.HandleFunc("/ws", unifiedWSHandler.HandleConnection)
 
 	// Set up a separate mux for metrics
 	metricsMux := http.NewServeMux()
