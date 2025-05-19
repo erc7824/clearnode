@@ -266,6 +266,13 @@ func (h *UnifiedWSHandler) HandleConnection(w http.ResponseWriter, r *http.Reque
 				h.sendErrorResponse(address, &rpcRequest.Req, rpcRequest.Sig, conn, "Failed to get channels: "+handlerErr.Error())
 				continue
 			}
+		case "get_rpc_history":
+			rpcResponse, handlerErr = HandleGetRPCHistory(&rpcRequest, h.rpcStore)
+			if handlerErr != nil {
+				log.Printf("Error handling get_rpc_history: %v", handlerErr)
+				h.sendErrorResponse(address, &rpcRequest.Req, rpcRequest.Sig, conn, "Failed to get RPC history: "+handlerErr.Error())
+				continue
+			}
 
 		default:
 			h.sendErrorResponse(address, &rpcRequest.Req, rpcRequest.Sig, conn, "Unsupported method")

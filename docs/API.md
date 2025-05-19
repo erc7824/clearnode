@@ -12,6 +12,7 @@
 | `get_app_definition` | Retrieves application definition for a ledger account |
 | `get_ledger_balances` | Lists participants and their balances for a ledger account |
 | `get_channels` | Lists all channels for a participant with their status |
+| `get_rpc_history` | Retrieves all RPC message history for a participant |
 | `create_app_session` | Creates a new virtual application on a ledger |
 | `close_app_session` | Closes a virtual application |
 | `close_channel` | Closes a payment channel |
@@ -203,6 +204,66 @@ Each channel response includes:
 - `network_id`: The blockchain network ID where the channel exists
 - `created_at`: When the channel was created (ISO 8601 format)
 - `updated_at`: When the channel was last updated (ISO 8601 format)
+
+### Get RPC History
+
+Retrieves all RPC messages history for a participant, ordered by timestamp (newest first).
+
+**Request:**
+
+```json
+{
+  "req": [4, "get_rpc_history", [{
+    "participant": "0x1234567890abcdef..."
+  }], 1619123456789],
+  "sig": ["0x9876fedcba..."]
+}
+```
+
+**Response:**
+
+```json
+{
+  "res": [4, "get_rpc_history", [[
+    {
+      "id": 123,
+      "sender_address": "0x1234567890abcdef...",
+      "req_id": 42,
+      "method": "get_channels",
+      "params": "[{\"participant\":\"0x1234567890abcdef...\"}]",
+      "timestamp": 1619123456789,
+      "req_sig": ["0x9876fedcba..."],
+      "result": "{\"res\":[42,\"get_channels\",[[...]],1619123456799]}",
+      "res_sig": ["0xabcd1234..."]
+    },
+    {
+      "id": 122,
+      "sender_address": "0x1234567890abcdef...",
+      "req_id": 41,
+      "method": "ping",
+      "params": "[null]",
+      "timestamp": 1619123446789,
+      "req_sig": ["0x8765fedcba..."],
+      "result": "{\"res\":[41,\"pong\",[],1619123446799]}",
+      "res_sig": ["0xdcba4321..."]
+    }
+  ]], 1619123456789],
+  "sig": ["0xabcd1234..."]
+}
+```
+
+The signature in the request must be from the participant's private key, verifying they own the address. This prevents unauthorized access to message history.
+
+Each RPC record includes:
+- `id`: Database ID for the record
+- `sender_address`: The participant's address that sent the request
+- `req_id`: The original request ID
+- `method`: The RPC method that was called
+- `params`: The parameters that were sent with the request (as a JSON string)
+- `timestamp`: When the request was received
+- `req_sig`: The signature(s) that were included with the request
+- `result`: The response that was sent back (as a JSON string)
+- `res_sig`: The signature(s) that were included with the response
 
 ## Virtual Application Management
 
