@@ -250,19 +250,6 @@ Retrieves all RPC messages history for a participant, ordered by timestamp (newe
 }
 ```
 
-The signature in the request must be from the participant's private key, verifying they own the address. This prevents unauthorized access to message history.
-
-Each RPC record includes:
-- `id`: Database ID for the record
-- `sender_address`: The participant's address that sent the request
-- `req_id`: The original request ID
-- `method`: The RPC method that was called
-- `params`: The parameters that were sent with the request (as a JSON string)
-- `timestamp`: When the request was received
-- `req_sig`: The signature(s) that were included with the request
-- `result`: The response that was sent back (as a JSON string)
-- `res_sig`: The signature(s) that were included with the response
-
 ## Virtual Application Management
 
 ### Create Virtual Application
