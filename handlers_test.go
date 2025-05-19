@@ -705,3 +705,111 @@ func TestHandleGetChannels(t *testing.T) {
 	assert.Error(t, err, "Should return error with missing participant")
 	assert.Contains(t, err.Error(), "missing participant", "Error should mention missing participant")
 }
+
+func TestHandleGetRPCHistory(t *testing.T) {
+	rawKey, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	signer := Signer{privateKey: rawKey}
+	participantAddr := signer.GetAddress().Hex()
+
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	rpcStore := NewRPCStore(db)
+
+	timestamp := uint64(time.Now().Unix())
+	records := []RPCRecord{
+		{
+			Sender:    participantAddr,
+			ReqID:     1,
+			Method:    "ping",
+			Params:    []byte(`[null]`),
+			Timestamp: timestamp - 3600, // 1 hour ago
+			ReqSig:    []string{"sig1"},
+			Response:  []byte(`{"res":[1,"pong",[],1621234567890]}`),
+			ResSig:    []string{},
+		},
+		{
+			Sender:    participantAddr,
+			ReqID:     2,
+			Method:    "get_config",
+			Params:    []byte(`[]`),
+			Timestamp: timestamp - 1800, // 30 minutes ago
+			ReqSig:    []string{"sig2"},
+			Response:  []byte(`{"res":[2,"get_config",[{"broker_address":"0xBroker"}],1621234597890]}`),
+			ResSig:    []string{},
+		},
+		{
+			Sender:    participantAddr,
+			ReqID:     3,
+			Method:    "get_channels",
+			Params:    []byte(`[{"participant":"` + participantAddr + `"}]`),
+			Timestamp: timestamp - 900, // 15 minutes ago
+			ReqSig:    []string{"sig3"},
+			Response:  []byte(`{"res":[3,"get_channels",[[]]],1621234627890]}`),
+			ResSig:    []string{},
+		},
+	}
+
+	for _, record := range records {
+		require.NoError(t, db.Create(&record).Error)
+	}
+
+	otherRecord := RPCRecord{
+		Sender:    "0xOtherParticipant",
+		ReqID:     4,
+		Method:    "ping",
+		Params:    []byte(`[null]`),
+		Timestamp: timestamp,
+		ReqSig:    []string{"sig4"},
+		Response:  []byte(`{"res":[4,"pong",[],1621234657890]}`),
+		ResSig:    []string{},
+	}
+	require.NoError(t, db.Create(&otherRecord).Error)
+
+	rpcRequest := &RPCRequest{
+		Req: RPCData{
+			RequestID: 100,
+			Method:    "get_rpc_history",
+			Params:    []any{},
+			Timestamp: timestamp,
+		},
+	}
+
+	reqBytes, err := json.Marshal(rpcRequest.Req)
+	require.NoError(t, err)
+	signed, err := signer.Sign(reqBytes)
+	require.NoError(t, err)
+	rpcRequest.Sig = []string{hexutil.Encode(signed)}
+
+	response, err := HandleGetRPCHistory(participantAddr, rpcRequest, rpcStore)
+	require.NoError(t, err)
+	require.NotNil(t, response)
+
+	assert.Equal(t, "get_rpc_history", response.Res.Method)
+	assert.Equal(t, uint64(100), response.Res.RequestID)
+
+	require.Len(t, response.Res.Params, 1, "Response should contain a RPCHistoryResponse")
+	rpcHistory, ok := response.Res.Params[0].([]RPCEntry)
+	require.True(t, ok, "Response parameter should be a RPCHistoryResponse")
+
+	assert.Len(t, rpcHistory, 3, "Should return 3 records for the participant")
+
+	assert.Equal(t, uint64(3), rpcHistory[0].ReqID, "First record should be the newest")
+	assert.Equal(t, uint64(2), rpcHistory[1].ReqID, "Second record should be the middle one")
+	assert.Equal(t, uint64(1), rpcHistory[2].ReqID, "Third record should be the oldest")
+
+	missingParamReq := &RPCRequest{
+		Req: RPCData{
+			RequestID: 789,
+			Method:    "get_rpc_history",
+			Params:    []any{},
+			Timestamp: uint64(time.Now().Unix()),
+		},
+		Sig: []string{hexutil.Encode(signed)},
+	}
+
+	_, err = HandleGetRPCHistory("", missingParamReq, rpcStore)
+	assert.Error(t, err, "Should return error with missing participant")
+	assert.Contains(t, err.Error(), "missing participant", "Error should mention missing participant")
+}

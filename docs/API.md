@@ -12,6 +12,7 @@
 | `get_app_definition` | Retrieves application definition for a ledger account |
 | `get_ledger_balances` | Lists participants and their balances for a ledger account |
 | `get_channels` | Lists all channels for a participant with their status |
+| `get_rpc_history` | Retrieves all RPC message history for a participant |
 | `create_app_session` | Creates a new virtual application on a ledger |
 | `close_app_session` | Closes a virtual application |
 | `close_channel` | Closes a payment channel |
@@ -203,6 +204,51 @@ Each channel response includes:
 - `network_id`: The blockchain network ID where the channel exists
 - `created_at`: When the channel was created (ISO 8601 format)
 - `updated_at`: When the channel was last updated (ISO 8601 format)
+
+### Get RPC History
+
+Retrieves all RPC messages history for a participant, ordered by timestamp (newest first).
+
+**Request:**
+
+```json
+{
+  "req": [4, "get_rpc_history", [], 1619123456789],
+  "sig": ["0x9876fedcba..."]
+}
+```
+
+**Response:**
+
+```json
+{
+  "res": [4, "get_rpc_history", [[
+    {
+      "id": 123,
+      "sender": "0x1234567890abcdef...",
+      "req_id": 42,
+      "method": "get_channels",
+      "params": "[{\"participant\":\"0x1234567890abcdef...\"}]",
+      "timestamp": 1619123456789,
+      "req_sig": ["0x9876fedcba..."],
+      "response": "{\"res\":[42,\"get_channels\",[[...]],1619123456799]}",
+      "res_sig": ["0xabcd1234..."]
+    },
+    {
+      "id": 122,
+      "sender": "0x1234567890abcdef...",
+      "req_id": 41,
+      "method": "ping",
+      "params": "[null]",
+      "timestamp": 1619123446789,
+      "req_sig": ["0x8765fedcba..."],
+      "response": "{\"res\":[41,\"pong\",[],1619123446799]}",
+      "res_sig": ["0xdcba4321..."]
+    }
+  ]], 1619123456789],
+  "sig": ["0xabcd1234..."]
+}
+```
 
 ## Virtual Application Management
 

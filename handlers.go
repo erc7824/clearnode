@@ -154,6 +154,19 @@ type BrokerConfig struct {
 	BrokerAddress string `json:"brokerAddress"`
 }
 
+// RPCEntry represents an RPC record from history.
+type RPCEntry struct {
+	ID        uint     `json:"id"`
+	Sender    string   `json:"sender"`
+	ReqID     uint64   `json:"req_id"`
+	Method    string   `json:"method"`
+	Params    string   `json:"params"`
+	Timestamp uint64   `json:"timestamp"`
+	ReqSig    []string `json:"req_sig"`
+	Result    string   `json:"response"`
+	ResSig    []string `json:"res_sig"`
+}
+
 // HandleGetConfig returns the broker configuration
 func HandleGetConfig(rpc *RPCRequest) (*RPCResponse, error) {
 	config := BrokerConfig{
@@ -796,4 +809,31 @@ func HandleGetChannels(rpc *RPCRequest, ledger *Ledger) (*RPCResponse, error) {
 	return rpcResponse, nil
 }
 
-// TODO: update RPC and add a handler returning RPC history.
+func HandleGetRPCHistory(participant string, rpc *RPCRequest, store *RPCStore) (*RPCResponse, error) {
+	if participant == "" {
+		return nil, errors.New("missing participant parameter")
+	}
+
+	var rpcHistory []RPCRecord
+	if err := store.db.Where("sender = ?", participant).Order("timestamp DESC").Find(&rpcHistory).Error; err != nil {
+		return nil, fmt.Errorf("failed to retrieve RPC history: %w", err)
+	}
+
+	response := make([]RPCEntry, 0, len(rpcHistory))
+	for _, record := range rpcHistory {
+		response = append(response, RPCEntry{
+			ID:        record.ID,
+			Sender:    record.Sender,
+			ReqID:     record.ReqID,
+			Method:    record.Method,
+			Params:    string(record.Params),
+			Timestamp: record.Timestamp,
+			ReqSig:    record.ReqSig,
+			ResSig:    record.ResSig,
+			Result:    string(record.Response),
+		})
+	}
+
+	rpcResponse := CreateResponse(rpc.Req.RequestID, rpc.Req.Method, []any{response}, time.Now())
+	return rpcResponse, nil
+}
