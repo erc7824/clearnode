@@ -420,9 +420,10 @@ Adjusts the capacity of a channel.
 `allocate_amount` is how much more token user wants to allocate to this token-network specific channel from his unified balance.
 `resize_amount` is how much user wants to deposit or withdraw from a token-network speecific channel.
 
+Example: 
 - Initial state: user an open channel on Polygon with 20 usdc, and a channel on Celo with 5 usdc.
-- User wants to deposit 75 usdc on Celo. User calls `resize_channel`, with `allocate_amount=0` and `resize_amount=-100`.
-- Now user has his unified balance at 100 usdc (20 on Polygon and 80 on Celo).
+- User wants to deposit 75 usdc on Celo. User calls `resize_channel`, with `allocate_amount=0` and `resize_amount=75`.
+- Now user's unified balance is 100 usdc (20 on Polygon and 80 on Celo).
 - Now user wants wo withdraw all 100 usdc on Polygon. To withdraw, user must allocate 80 on this specific channel (`allocate_amount=80`), and resize it (`resize_amount=-100`). Also it is recommended to deallocate the channel on Celo (optional, but we may make this required in the future).
 
 **Response:**
