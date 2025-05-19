@@ -531,7 +531,7 @@ When an error occurs, the server responds with an error message:
 
 ```json
 {
-  "res": [REQUEST_ID, "res", "error", [{
+  "res": [REQUEST_ID, "error", [{
     "error": "Error message describing what went wrong"
   }], 1619123456789],
   "sig": ["0xabcd1234..."]
