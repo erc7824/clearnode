@@ -176,19 +176,28 @@ func (h *UnifiedWSHandler) HandleConnection(w http.ResponseWriter, r *http.Reque
 		h.authManager.UpdateSession(address)
 
 		// Forward request or response for internal vApp communication.
-		var rpcRequest RPCMessage
-		if err := json.Unmarshal(messageBytes, &rpcRequest); err != nil {
+		var msg RPCMessage
+		if err := json.Unmarshal(messageBytes, &msg); err != nil {
 			h.sendErrorResponse(address, nil, conn, "Invalid message format")
 			continue
 		}
 
-		if err := validate.Struct(&rpcRequest); err != nil {
+		if err := validate.Struct(&msg); err != nil {
 			log.Printf("Invalid message format: %v", err)
 			h.sendErrorResponse(address, nil, conn, "Invalid message format")
 			return
 		}
 
-		if rpcRequest.Req == nil {
+		if msg.AppSessionID != "" {
+			if err := forwardMessage(&msg, messageBytes, address, h); err != nil {
+				log.Printf("Error forwarding message: %v", err)
+				h.sendErrorResponse(address, nil, conn, "Failed to forward message: "+err.Error())
+				continue
+			}
+			continue
+		}
+
+		if msg.Req == nil {
 			continue
 		}
 
@@ -196,77 +205,77 @@ func (h *UnifiedWSHandler) HandleConnection(w http.ResponseWriter, r *http.Reque
 		var handlerErr error
 
 		// Track RPC request by method
-		h.metrics.RPCRequests.WithLabelValues(rpcRequest.Req.Method).Inc()
+		h.metrics.RPCRequests.WithLabelValues(msg.Req.Method).Inc()
 
-		switch rpcRequest.Req.Method {
+		switch msg.Req.Method {
 		case "ping":
-			rpcResponse, handlerErr = HandlePing(&rpcRequest)
+			rpcResponse, handlerErr = HandlePing(&msg)
 			if handlerErr != nil {
 				log.Printf("Error handling ping: %v", handlerErr)
-				h.sendErrorResponse(address, &rpcRequest, conn, "Failed to process ping: "+handlerErr.Error())
+				h.sendErrorResponse(address, &msg, conn, "Failed to process ping: "+handlerErr.Error())
 				continue
 			}
 
 		case "get_config":
-			rpcResponse, handlerErr = HandleGetConfig(&rpcRequest, h.config, h.signer)
+			rpcResponse, handlerErr = HandleGetConfig(&msg, h.config, h.signer)
 			if handlerErr != nil {
 				log.Printf("Error handling get_config: %v", handlerErr)
-				h.sendErrorResponse(address, &rpcRequest, conn, "Failed to get config: "+handlerErr.Error())
+				h.sendErrorResponse(address, &msg, conn, "Failed to get config: "+handlerErr.Error())
 				continue
 			}
 
 		case "get_ledger_balances":
-			rpcResponse, handlerErr = HandleGetLedgerBalances(&rpcRequest, address, h.db)
+			rpcResponse, handlerErr = HandleGetLedgerBalances(&msg, address, h.db)
 			if handlerErr != nil {
 				log.Printf("Error handling get_ledger_balances: %v", handlerErr)
-				h.sendErrorResponse(address, &rpcRequest, conn, "Failed to get ledger balances: "+handlerErr.Error())
+				h.sendErrorResponse(address, &msg, conn, "Failed to get ledger balances: "+handlerErr.Error())
 				continue
 			}
 
 		case "get_app_definition":
-			rpcResponse, handlerErr = HandleGetAppDefinition(&rpcRequest, h.db)
+			rpcResponse, handlerErr = HandleGetAppDefinition(&msg, h.db)
 			if handlerErr != nil {
 				log.Printf("Error handling get_app_definition: %v", handlerErr)
-				h.sendErrorResponse(address, &rpcRequest, conn, "Failed to get app definition: "+handlerErr.Error())
+				h.sendErrorResponse(address, &msg, conn, "Failed to get app definition: "+handlerErr.Error())
 				continue
 			}
 
 		case "create_app_session":
-			rpcResponse, handlerErr = HandleCreateApplication(&rpcRequest, h.db)
+			rpcResponse, handlerErr = HandleCreateApplication(&msg, h.db)
 			if handlerErr != nil {
 				log.Printf("Error handling create_app_session: %v", handlerErr)
-				h.sendErrorResponse(address, &rpcRequest, conn, "Failed to create application: "+handlerErr.Error())
+				h.sendErrorResponse(address, &msg, conn, "Failed to create application: "+handlerErr.Error())
 				continue
 			}
 
 		case "close_app_session":
-			rpcResponse, handlerErr = HandleCloseApplication(&rpcRequest, h.db)
+			rpcResponse, handlerErr = HandleCloseApplication(&msg, h.db)
 			if handlerErr != nil {
 				log.Printf("Error handling close_app_session: %v", handlerErr)
-				h.sendErrorResponse(address, &rpcRequest, conn, "Failed to close application: "+handlerErr.Error())
+				h.sendErrorResponse(address, &msg, conn, "Failed to close application: "+handlerErr.Error())
 				continue
 			}
 
 		case "resize_channel":
-			rpcResponse, handlerErr = HandleResizeChannel(&rpcRequest, h.db, h.signer)
+			rpcResponse, handlerErr = HandleResizeChannel(&msg, h.db, h.signer)
 			if handlerErr != nil {
 				log.Printf("Error handling resize_channel: %v", handlerErr)
-				h.sendErrorResponse(address, &rpcRequest, conn, "Failed to resize channel: "+handlerErr.Error())
+				h.sendErrorResponse(address, &msg, conn, "Failed to resize channel: "+handlerErr.Error())
 				continue
 			}
 
 		case "close_channel":
-			rpcResponse, handlerErr = HandleCloseChannel(&rpcRequest, h.db, h.signer)
+			rpcResponse, handlerErr = HandleCloseChannel(&msg, h.db, h.signer)
 			if handlerErr != nil {
 				log.Printf("Error handling close_channel: %v", handlerErr)
-				h.sendErrorResponse(address, &rpcRequest, conn, "Failed to close channel: "+handlerErr.Error())
+				h.sendErrorResponse(address, &msg, conn, "Failed to close channel: "+handlerErr.Error())
 				continue
 			}
 		case "get_channels":
-			rpcResponse, handlerErr = HandleGetChannels(&rpcRequest, h.db)
+			rpcResponse, handlerErr = HandleGetChannels(&msg, h.db)
 			if handlerErr != nil {
 				log.Printf("Error handling get_channels: %v", handlerErr)
-				h.sendErrorResponse(address, &rpcRequest, conn, "Failed to get channels: "+handlerErr.Error())
+				h.sendErrorResponse(address, &msg, conn, "Failed to get channels: "+handlerErr.Error())
 				continue
 			}
 		case "get_rpc_history":
@@ -278,7 +287,7 @@ func (h *UnifiedWSHandler) HandleConnection(w http.ResponseWriter, r *http.Reque
 			}
 
 		default:
-			h.sendErrorResponse(address, &rpcRequest, conn, "Unsupported method")
+			h.sendErrorResponse(address, &msg, conn, "Unsupported method")
 			continue
 		}
 
@@ -288,7 +297,7 @@ func (h *UnifiedWSHandler) HandleConnection(w http.ResponseWriter, r *http.Reque
 		rpcResponse.Sig = []string{hexutil.Encode(signature)}
 		wsResponseData, _ := json.Marshal(rpcResponse)
 
-		if err := h.rpcStore.StoreMessage(address, rpcRequest.Req, rpcRequest.Sig, byteData, rpcResponse.Sig); err != nil {
+		if err := h.rpcStore.StoreMessage(address, msg.Req, msg.Sig, byteData, rpcResponse.Sig); err != nil {
 			log.Printf("Failed to store RPC message: %v", err)
 			// continue processing even if storage fails
 		}
@@ -317,14 +326,21 @@ func (h *UnifiedWSHandler) HandleConnection(w http.ResponseWriter, r *http.Reque
 }
 
 // forwardMessage forwards an RPC message to all recipients in a virtual app
-func forwardMessage(appID string, rpcData RPCData, signatures []string, msg []byte, fromAddress string, h *UnifiedWSHandler) error {
-	reqBytes, err := json.Marshal(rpcData)
+func forwardMessage(rpc *RPCMessage, msg []byte, fromAddress string, h *UnifiedWSHandler) error {
+	var data *RPCData
+	if rpc.Req != nil {
+		data = rpc.Req
+	} else {
+		data = rpc.Res
+	}
+
+	reqBytes, err := json.Marshal(data)
 	if err != nil {
 		return errors.New("Error validating signature: " + err.Error())
 	}
 
 	recoveredAddresses := map[string]bool{}
-	for _, sig := range signatures {
+	for _, sig := range rpc.Sig {
 		addr, err := RecoverAddress(reqBytes, sig)
 		if err != nil {
 			return errors.New("invalid signature: " + err.Error())
@@ -337,8 +353,8 @@ func forwardMessage(appID string, rpcData RPCData, signatures []string, msg []by
 	}
 
 	var vApp AppSession
-	if err := h.db.Where("app_id = ?", appID).First(&vApp).Error; err != nil {
-		return errors.New("failed to find virtual app: " + err.Error())
+	if err := h.db.Where("session_id = ?", rpc.AppSessionID).First(&vApp).Error; err != nil {
+		return errors.New("failed to find virtual app session: " + err.Error())
 	}
 
 	// Iterate over all recipients in a virtual app and send the message

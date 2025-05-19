@@ -460,6 +460,38 @@ Example:
 
 The channel will be resized on the blockchain network where it was originally opened, as identified by the `chain_id` associated with the channel. The `new_amount` parameter specifies the desired capacity for the channel.
 
+## Messaging
+
+### Send Message in Virtual Application
+
+Sends a message to all participants in a virtual app session.
+
+**Request:**
+
+```json
+{
+  "req": [1, "your_custom_method", [{
+    "your_custom_field": "Hello, application participants!"
+  }], 1619123456789],
+  "sid": "0x3456789012abcdef...", // Virtual App Session ID
+  "sig": ["0x9876fedcba..."]
+}
+```
+
+### Send Response in Virtual Application
+
+Responses can also be forwarded to all participants in a virtual application by including the AppSessionID `sid`:
+
+```json
+{
+  "res": [1, "your_custom_method", [{
+    "your_custom_field": "I confirm that I have received your message!"
+  }], 1619123456789],
+  "sid": "0x3456789012abcdef...", // Virtual App Session ID
+  "sig": ["0x9876fedcba..."]
+}
+```
+
 ## Utility Methods
 
 ### Ping

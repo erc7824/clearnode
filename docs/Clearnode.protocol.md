@@ -96,12 +96,13 @@ All messages exchanged between clients and clearnodes follow this standardized f
 ```json
 {
   "res": [REQUEST_ID, METHOD, [RESPONSE_DATA], TIMESTAMP],
-  "acc": "ACCOUNT_ID", // AppId for Virtual Ledgers for Internal Communication
+  "sid": "APP_SESSION_ID", // AppId for Virtual Ledgers for Internal Communication
   "int": [INTENT],// Allocation intent change
   "sig": ["SIGNATURE"]
 }
 ```
 
+- The `sid` field serves as both the subject and destination pubsub topic for the message. There is a one-to-one mapping between topics and ledger accounts.
 - The `sig` field contains one or more signatures, of the `res` data.
 
 
@@ -111,6 +112,7 @@ The structure breakdown:
 - `METHOD`: The name of the method being called (`string`)
 - `PARAMETERS`/`RESPONSE_DATA`: An array of parameters/response data (`[]any`)
 - `TIMESTAMP`: Unix timestamp of the request/response in milliseconds (`uint64`)
+- `APP_SESSION_ID` (`sid`): If specified, the message gets forwarded to all participants of a virtual app with thosn AppSessionID.
 - `SIGNATURE`: Cryptographic signatures of the message (`[]string`). Multiple signatures may be required for certain operations.
 
 ## Data Types
@@ -180,7 +182,7 @@ When an error occurs, the server responds with an error message:
 
 ```json
 {
-  "data": [REQUEST_ID, "res", "error", [{
+  "res": [REQUEST_ID, "res", "error", [{
     "error": "Error message describing what went wrong"
   }], TIMESTAMP],
   "sig": ["SIGNATURE"]

@@ -9,9 +9,10 @@ import (
 
 // RPCMessage represents a complete message in the RPC protocol, including data and signatures
 type RPCMessage struct {
-	Req *RPCData `json:"req,omitempty" validate:"required_without=Res"`
-	Res *RPCData `json:"res,omitempty" validate:"required_without=Req"`
-	Sig []string `json:"sig"`
+	Req          *RPCData `json:"req,omitempty" validate:"required_without=Res,excluded_with=Res"`
+	Res          *RPCData `json:"res,omitempty" validate:"required_without=Req,excluded_with=Req"`
+	AppSessionID string   `json:"sid,omitempty"` // If specified, message is delivered to the virtual app session participants.
+	Sig          []string `json:"sig"`
 }
 
 // RPCData represents the common structure for both requests and responses
