@@ -79,7 +79,7 @@ type AppSessionResponse struct {
 // ResizeChannelParams represents parameters needed for resizing a channel
 type ResizeChannelParams struct {
 	ChannelID        string   `json:"channel_id"                          validate:"required"`
-	AllocateAmount   *big.Int `json:"allocate_amount,omitempty"           validate:"required_without=ResizeAmount,gte=0"`
+	AllocateAmount   *big.Int `json:"allocate_amount,omitempty"           validate:"required_without=ResizeAmount"`
 	ResizeAmount     *big.Int `json:"resize_amount,omitempty"             validate:"required_without=AllocateAmount"`
 	FundsDestination string   `json:"funds_destination"                   validate:"required"`
 }
@@ -621,6 +621,10 @@ func HandleResizeChannel(rpc *RPCMessage, db *gorm.DB, signer *Signer) (*RPCMess
 	}
 
 	newChannelAmount.Add(newChannelAmount, params.ResizeAmount)
+
+	if newChannelAmount.Cmp(big.NewInt(0)) < 0 {
+		return nil, errors.New("new channel amount must be positive")
+	}
 
 	brokerPart := channel.Amount - newChannelAmount.Uint64()
 
