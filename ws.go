@@ -247,6 +247,7 @@ func (h *UnifiedWSHandler) HandleConnection(w http.ResponseWriter, r *http.Reque
 				h.sendErrorResponse(address, &msg, conn, "Failed to create application: "+handlerErr.Error())
 				continue
 			}
+			h.sendBalanceUpdate(address)
 
 		case "close_app_session":
 			rpcResponse, handlerErr = HandleCloseApplication(&msg, h.db)
@@ -255,7 +256,7 @@ func (h *UnifiedWSHandler) HandleConnection(w http.ResponseWriter, r *http.Reque
 				h.sendErrorResponse(address, &msg, conn, "Failed to close application: "+handlerErr.Error())
 				continue
 			}
-
+			h.sendBalanceUpdate(address)
 		case "resize_channel":
 			rpcResponse, handlerErr = HandleResizeChannel(&msg, h.db, h.signer)
 			if handlerErr != nil {
@@ -450,6 +451,53 @@ func (h *UnifiedWSHandler) sendErrorResponse(sender string, rpc *RPCMessage, con
 
 	// Reset the write deadline
 	conn.SetWriteDeadline(time.Time{})
+}
+
+// sendErrorResponse creates and sends an error response to the client
+func (h *UnifiedWSHandler) sendBalanceUpdate(sender string) {
+	balances, err := GetParticipantLedger(h.db, sender).GetBalances(sender)
+	response := CreateResponse(uint64(time.Now().UnixNano()), "bu", []any{balances}, time.Now())
+
+	byteData, _ := json.Marshal(response.Req)
+	signature, _ := h.signer.Sign(byteData)
+	response.Sig = []string{hexutil.Encode(signature)}
+
+	responseData, err := json.Marshal(response)
+	if err != nil {
+		log.Printf("Error marshaling error response: %v", err)
+		return
+	}
+
+	h.connectionsMu.RLock()
+	recipientConn, exists := h.connections[sender]
+	h.connectionsMu.RUnlock()
+	if exists {
+		// Use NextWriter for safer message delivery
+		w, err := recipientConn.NextWriter(websocket.TextMessage)
+		if err != nil {
+			log.Printf("Error getting writer for balance update to %s: %v", sender, err)
+			return
+		}
+
+		if _, err := w.Write(responseData); err != nil {
+			log.Printf("Error writing balance update to %s: %v", sender, err)
+			w.Close()
+			return
+		}
+
+		if err := w.Close(); err != nil {
+			log.Printf("Error closing writer for balance update to %s: %v", sender, err)
+			return
+		}
+
+		// Increment sent message counter for each forwarded message
+		h.metrics.MessageSent.Inc()
+
+		log.Printf("Successfully forwarded message to %s", sender)
+	} else {
+		log.Printf("Recipient %s not connected", sender)
+		return
+	}
 }
 
 // CloseAllConnections closes all open WebSocket connections during shutdown
