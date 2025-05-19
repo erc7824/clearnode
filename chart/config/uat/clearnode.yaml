@@ -1,0 +1,59 @@
+config:
+  args: ["clearnode"]
+  logLevel: debug
+  database:
+    driver: postgres
+    host: postgresql.core
+    port: 5432
+    name: clearnet_uat
+    user: clearnet_uat_admin
+    password: ref+tfstategs://terraform-state-deploy/gke-uat-postgresql-admin/default.tfstate/output.postgresql_user_passwords["clearnet_uat_admin"]
+  envSecret: ""
+  extraEnvs:
+    POLYGON_CUSTODY_CONTRACT_ADDRESS: "0xEe51DE64ca10B802E24A3D4caD78213a7d847e64"
+  secretEnvs:
+    BROKER_PRIVATE_KEY: ref+gcpsecrets://ynet-stage/clearnet-uat-broker-private-key?version=latest
+    POLYGON_INFURA_URL: ref+gcpsecrets://ynet-stage/clearnet-uat-polygon-infura-url?version=latest
+
+image:
+  repository: ghcr.io/erc7824/clearnode
+  tag: 0.0.1
+
+service:
+  http:
+    enabled: true
+    port: 8000
+    path: /
+
+metrics:
+  enabled: true
+  podmonitoring:
+    enabled: true
+  port: 4242
+  endpoint: "/metrics"
+
+resources:
+  limits:
+    cpu: 100m
+    memory: 256Mi
+    ephemeral-storage: 100Mi
+  requests:
+    cpu: 100m
+    memory: 256Mi
+    ephemeral-storage: 100Mi
+
+autoscaling:
+  enabled: false
+
+networking:
+  externalHostname: clearnet.uat.neodax.app
+  tlsClusterIssuer: zerossl-prod
+  gateway:
+    enabled: false
+  ingress:
+    enabled: true
+    className: nginx
+    tls:
+      enabled: true
+
+imagePullSecret: ghcr-pull
