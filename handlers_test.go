@@ -743,3 +743,128 @@ func TestHandleGetRPCHistory(t *testing.T) {
 	assert.Error(t, err, "Should return error with missing participant")
 	assert.Contains(t, err.Error(), "missing participant", "Error should mention missing participant")
 }
+
+// TestHandleGetLedgerEntries tests the get ledger entries handler functionality
+func TestHandleGetLedgerEntries(t *testing.T) {
+	// Set up test database with cleanup
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	participant := "0xParticipant1"
+	ledger := GetParticipantLedger(db, participant)
+
+	// Create test entries with different assets
+	testData := []struct {
+		asset  string
+		amount decimal.Decimal
+	}{
+		{"usdc", decimal.NewFromInt(100)},
+		{"usdc", decimal.NewFromInt(200)},
+		{"usdc", decimal.NewFromInt(-50)},
+		{"eth", decimal.NewFromFloat(1.5)},
+		{"eth", decimal.NewFromFloat(-0.5)},
+	}
+
+	// Insert test entries
+	for _, data := range testData {
+		err := ledger.Record(participant, data.asset, data.amount)
+		require.NoError(t, err)
+	}
+
+	// Test Case 1: Get all entries for the participant
+	params1 := map[string]string{
+		"participant": participant,
+	}
+	paramsJSON1, err := json.Marshal(params1)
+	require.NoError(t, err)
+
+	rpcRequest1 := &RPCMessage{
+		Req: &RPCData{
+			RequestID: 1,
+			Method:    "get_ledger_entries",
+			Params:    []any{json.RawMessage(paramsJSON1)},
+			Timestamp: uint64(time.Now().Unix()),
+		},
+		Sig: []string{"dummy-signature"},
+	}
+
+	// Call the handler
+	resp1, err := HandleGetLedgerEntries(rpcRequest1, participant, db)
+	require.NoError(t, err)
+	assert.NotNil(t, resp1)
+
+	// Verify response format
+	assert.Equal(t, "get_ledger_entries", resp1.Res.Method)
+	assert.Equal(t, uint64(1), resp1.Res.RequestID)
+	require.Len(t, resp1.Res.Params, 1, "Response should contain an array of Entry objects")
+
+	// Extract and verify entries
+	entries1, ok := resp1.Res.Params[0].([]Entry)
+	require.True(t, ok, "Response parameter should be a slice of Entry")
+	assert.Len(t, entries1, 5, "Should return all 5 entries")
+
+	// Count entries by asset
+	assetCounts := map[string]int{}
+	for _, entry := range entries1 {
+		assetCounts[entry.AssetSymbol]++
+		assert.Equal(t, participant, entry.AccountID)
+		assert.Equal(t, participant, entry.Participant)
+	}
+	assert.Equal(t, 3, assetCounts["usdc"], "Should have 3 USDC entries")
+	assert.Equal(t, 2, assetCounts["eth"], "Should have 2 ETH entries")
+
+	// Test Case 2: Get entries for a specific asset
+	params2 := map[string]string{
+		"participant": participant,
+		"asset":       "usdc",
+	}
+	paramsJSON2, err := json.Marshal(params2)
+	require.NoError(t, err)
+
+	rpcRequest2 := &RPCMessage{
+		Req: &RPCData{
+			RequestID: 2,
+			Method:    "get_ledger_entries",
+			Params:    []any{json.RawMessage(paramsJSON2)},
+			Timestamp: uint64(time.Now().Unix()),
+		},
+		Sig: []string{"dummy-signature"},
+	}
+
+	// Call the handler
+	resp2, err := HandleGetLedgerEntries(rpcRequest2, participant, db)
+	require.NoError(t, err)
+	assert.NotNil(t, resp2)
+
+	// Verify response format for specific asset
+	assert.Equal(t, "get_ledger_entries", resp2.Res.Method)
+	assert.Equal(t, uint64(2), resp2.Res.RequestID)
+
+	// Extract and verify entries for specific asset
+	entries2, ok := resp2.Res.Params[0].([]Entry)
+	require.True(t, ok, "Response parameter should be a slice of Entry")
+	assert.Len(t, entries2, 3, "Should return 3 USDC entries")
+
+	// Ensure all entries are for USDC
+	for _, entry := range entries2 {
+		assert.Equal(t, "usdc", entry.AssetSymbol)
+		assert.Equal(t, participant, entry.AccountID)
+		assert.Equal(t, participant, entry.Participant)
+	}
+
+	// Test Case 3: Error case - invalid participant
+	rpcRequest3 := &RPCMessage{
+		Req: &RPCData{
+			RequestID: 3,
+			Method:    "get_ledger_entries",
+			Params:    []any{json.RawMessage(`{"participant": ""}`)},
+			Timestamp: uint64(time.Now().Unix()),
+		},
+		Sig: []string{"dummy-signature"},
+	}
+
+	// Call with empty participant
+	resp3, err := HandleGetLedgerEntries(rpcRequest3, "", db)
+	assert.Error(t, err, "Should return error with empty participant")
+	assert.Nil(t, resp3)
+}
