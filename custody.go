@@ -71,6 +71,7 @@ func NewCustody(signer *Signer, db *gorm.DB, sendBalanceUpdate func(string), sen
 		chainID:           uint32(chainID.Int64()),
 		signer:            signer,
 		sendBalanceUpdate: sendBalanceUpdate,
+		sendChannelUpdate: sendChannelUpdate,
 	}, nil
 }
 
