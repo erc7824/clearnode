@@ -613,13 +613,16 @@ func HandleResizeChannel(rpc *RPCMessage, db *gorm.DB, signer *Signer) (*RPCMess
 	if err != nil {
 		return nil, fmt.Errorf("failed to check participant A balance: %w", err)
 	}
+	fmt.Println("unified balance:", balance.String())
 	rawBalance := balance.Shift(int32(asset.Decimals)).BigInt()
+	fmt.Println("unified balance raw:", rawBalance.String())
 
 	newChannelAmount := new(big.Int).Add(new(big.Int).SetUint64(channel.Amount), params.AllocateAmount)
 	if rawBalance.Cmp(newChannelAmount) < 0 {
 		return nil, errors.New("insufficient unified balance")
 	}
-
+	fmt.Println("channel amount:", channel.Amount)
+	fmt.Println("new channel amount:", newChannelAmount.String())
 	newChannelAmount.Add(newChannelAmount, params.ResizeAmount)
 
 	if newChannelAmount.Cmp(big.NewInt(0)) < 0 {
