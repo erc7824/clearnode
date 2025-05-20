@@ -609,7 +609,7 @@ func HandleResizeChannel(rpc *RPCMessage, db *gorm.DB, signer *Signer) (*RPCMess
 	}
 
 	ledger := GetParticipantLedger(db, channel.Participant)
-	balance, err := ledger.Balance(channel.ChannelID, asset.Symbol)
+	balance, err := ledger.Balance(channel.Participant, asset.Symbol)
 	if err != nil {
 		return nil, fmt.Errorf("failed to check participant A balance: %w", err)
 	}
@@ -739,7 +739,7 @@ func HandleCloseChannel(rpc *RPCMessage, db *gorm.DB, signer *Signer) (*RPCMessa
 	}
 
 	ledger := GetParticipantLedger(db, channel.Participant)
-	balance, err := ledger.Balance(channel.ChannelID, asset.Symbol)
+	balance, err := ledger.Balance(channel.Participant, asset.Symbol)
 	if err != nil {
 		return nil, fmt.Errorf("failed to check participant A balance: %w", err)
 	}
