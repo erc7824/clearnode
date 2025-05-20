@@ -431,7 +431,7 @@ func (h *UnifiedWSHandler) sendErrorResponse(sender string, rpc *RPCMessage, con
 		return
 	}
 
-	if rpc.Req != nil {
+	if rpc != nil && rpc.Req != nil {
 		if err := h.rpcStore.StoreMessage(sender, rpc.Req, rpc.Sig, byteData, response.Sig); err != nil {
 			log.Printf("Failed to store RPC message: %v", err)
 			// continue processing even if storage fails
