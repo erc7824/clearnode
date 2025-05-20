@@ -236,6 +236,14 @@ func (h *UnifiedWSHandler) HandleConnection(w http.ResponseWriter, r *http.Reque
 				continue
 			}
 
+		case "get_assets":
+			rpcResponse, handlerErr = HandleGetAssets(&msg, h.db)
+			if handlerErr != nil {
+				log.Printf("Error handling get_assets: %v", handlerErr)
+				h.sendErrorResponse(address, &msg, conn, "Failed to get assets: "+handlerErr.Error())
+				continue
+			}
+
 		case "get_ledger_balances":
 			rpcResponse, handlerErr = HandleGetLedgerBalances(&msg, address, h.db)
 			if handlerErr != nil {
@@ -277,6 +285,7 @@ func (h *UnifiedWSHandler) HandleConnection(w http.ResponseWriter, r *http.Reque
 				continue
 			}
 			h.sendBalanceUpdate(address)
+
 		case "resize_channel":
 			rpcResponse, handlerErr = HandleResizeChannel(&msg, h.db, h.signer)
 			if handlerErr != nil {
@@ -292,6 +301,7 @@ func (h *UnifiedWSHandler) HandleConnection(w http.ResponseWriter, r *http.Reque
 				h.sendErrorResponse(address, &msg, conn, "Failed to close channel: "+handlerErr.Error())
 				continue
 			}
+
 		case "get_channels":
 			rpcResponse, handlerErr = HandleGetChannels(&msg, h.db)
 			if handlerErr != nil {
@@ -299,6 +309,7 @@ func (h *UnifiedWSHandler) HandleConnection(w http.ResponseWriter, r *http.Reque
 				h.sendErrorResponse(address, &msg, conn, "Failed to get channels: "+handlerErr.Error())
 				continue
 			}
+
 		case "get_rpc_history":
 			rpcResponse, handlerErr = HandleGetRPCHistory(address, &msg, h.rpcStore)
 			if handlerErr != nil {
