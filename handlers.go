@@ -600,7 +600,7 @@ func HandleResizeChannel(rpc *RPCMessage, db *gorm.DB, signer *Signer) (*RPCMess
 		return nil, errors.New("invalid signature")
 	}
 
-	asset, err := GetAssetBySymbol(db, channel.Token, channel.ChainID)
+	asset, err := GetAssetByToken(db, channel.Token, channel.ChainID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to find asset: %w", err)
 	}
@@ -727,7 +727,7 @@ func HandleCloseChannel(rpc *RPCMessage, db *gorm.DB, signer *Signer) (*RPCMessa
 		return nil, errors.New("invalid signature")
 	}
 
-	asset, err := GetAssetBySymbol(db, channel.Token, channel.ChainID)
+	asset, err := GetAssetByToken(db, channel.Token, channel.ChainID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to find asset: %w", err)
 	}
