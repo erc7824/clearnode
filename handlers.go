@@ -236,6 +236,36 @@ func HandleGetLedgerBalances(rpc *RPCMessage, address string, db *gorm.DB) (*RPC
 	return rpcResponse, nil
 }
 
+func HandleGetLedgerEntries(rpc *RPCMessage, address string, db *gorm.DB) (*RPCMessage, error) {
+	var accountID string
+	var asset string
+
+	if len(rpc.Req.Params) > 0 {
+		paramsJSON, err := json.Marshal(rpc.Req.Params[0])
+		if err == nil {
+			var params map[string]string
+			if err := json.Unmarshal(paramsJSON, &params); err == nil {
+				accountID = params["account_id"]
+				asset = params["asset"]
+			}
+		}
+	}
+
+	if accountID == "" {
+		return nil, errors.New("missing account_id")
+	}
+
+	ledger := GetParticipantLedger(db, address)
+
+	entries, err := ledger.GetEntries(accountID, asset)
+	if err != nil {
+		return nil, fmt.Errorf("failed to find account: %w", err)
+	}
+
+	rpcResponse := CreateResponse(rpc.Req.RequestID, rpc.Req.Method, []any{entries}, time.Now())
+	return rpcResponse, nil
+}
+
 // HandleCreateApplication creates a virtual application between participants
 func HandleCreateApplication(rpc *RPCMessage, db *gorm.DB) (*RPCMessage, error) {
 	if len(rpc.Req.Params) < 1 {

@@ -94,3 +94,16 @@ func (l *ParticipantLedger) GetBalances(accountID string) ([]Balance, error) {
 	}
 	return balances, nil
 }
+
+func (l *ParticipantLedger) GetEntries(accountID, assetSymbol string) ([]Entry, error) {
+	var entries []Entry
+	q := l.db.Where("account_id = ? AND participant = ?", accountID, l.participant)
+	if assetSymbol != "" {
+		q = q.Where("asset_symbol = ?", assetSymbol)
+	}
+
+	if err := q.Find(&entries).Error; err != nil {
+		return nil, err
+	}
+	return entries, nil
+}

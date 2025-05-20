@@ -244,6 +244,14 @@ func (h *UnifiedWSHandler) HandleConnection(w http.ResponseWriter, r *http.Reque
 				continue
 			}
 
+		case "get_ledger_entries":
+			rpcResponse, handlerErr = HandleGetLedgerEntries(&msg, address, h.db)
+			if handlerErr != nil {
+				log.Printf("Error handling get_ledger_entries: %v", handlerErr)
+				h.sendErrorResponse(address, &msg, conn, "Failed to get ledger entries: "+handlerErr.Error())
+				continue
+			}
+
 		case "get_app_definition":
 			rpcResponse, handlerErr = HandleGetAppDefinition(&msg, h.db)
 			if handlerErr != nil {

@@ -11,6 +11,7 @@
 | `get_config` | Retrieves broker configuration and supported networks |
 | `get_app_definition` | Retrieves application definition for a ledger account |
 | `get_ledger_balances` | Lists participants and their balances for a ledger account |
+| `get_ledger_entries` | Retrieves detailed ledger entries for a participant |
 | `get_channels` | Lists all channels for a participant with their status across all chains |
 | `get_rpc_history` | Retrieves all RPC message history for a participant |
 | `create_app_session` | Creates a new virtual application on a ledger |
@@ -147,6 +148,52 @@ Retrieves the balances of all participants in a specific ledger account.
 }
 ```
 
+### Get Ledger Entries
+
+Retrieves the detailed ledger entries for an account, providing a complete transaction history. This can be used to audit all deposits, withdrawals, and transfers.
+
+**Request:**
+
+```json
+{
+  "req": [1, "get_ledger_entries", [{
+    "account_id": "0x1234567890abcdef...",
+    "asset": "usdc"  // Optional: filter by asset
+  }], 1619123456789],
+  "sig": ["0x9876fedcba..."]
+}
+```
+
+**Response:**
+
+```json
+{
+  "res": [1, "get_ledger_entries", [[
+    {
+      "id": 123,
+      "account_id": "0x1234567890abcdef...",
+      "account_type": 0,
+      "asset_symbol": "usdc",
+      "participant": "0x1234567890abcdef...",
+      "credit": "100.0",
+      "debit": "0.0",
+      "created_at": "2023-05-01T12:00:00Z"
+    },
+    {
+      "id": 124,
+      "account_id": "0x1234567890abcdef...",
+      "account_type": 0,
+      "asset_symbol": "usdc",
+      "participant": "0x1234567890abcdef...",
+      "credit": "0.0",
+      "debit": "25.0",
+      "created_at": "2023-05-01T14:30:00Z"
+    }
+  ]], 1619123456789],
+  "sig": ["0xabcd1234..."]
+}
+```
+
 ### Get Channels
 
 Retrieves all channels for a participant (both open, closed, and joining), ordered by creation date (newest first). This method returns channels across all supported chains.
@@ -209,7 +256,7 @@ Each channel response includes:
 - `token`: The token address for the channel
 - `amount`: Total channel capacity
 - `chain_id`: The blockchain network ID where the channel exists (e.g., 137 for Polygon, 42220 for Celo, 8453 for Base)
-- `adjudicator`: The address of the adjudicator contract 
+- `adjudicator`: The address of the adjudicator contract
 - `challenge`: Challenge period duration in seconds
 - `nonce`: Current nonce value for the channel
 - `version`: Current version of the channel state
@@ -291,7 +338,7 @@ Creates a virtual application between participants.
       },
       {
         "participant": "0x00112233445566778899AaBbCcDdEeFf00112233",
-        "asset": "usdc", 
+        "asset": "usdc",
         "amount": "100.0"
       }
     ]
@@ -420,7 +467,7 @@ Adjusts the capacity of a channel.
 `allocate_amount` is how much more token user wants to allocate to this token-network specific channel from his unified balance.
 `resize_amount` is how much user wants to deposit or withdraw from a token-network speecific channel.
 
-Example: 
+Example:
 - Initial state: user an open channel on Polygon with 20 usdc, and a channel on Celo with 5 usdc.
 - User wants to deposit 75 usdc on Celo. User calls `resize_channel`, with `allocate_amount=0` and `resize_amount=75`.
 - Now user's unified balance is 100 usdc (20 on Polygon and 80 on Celo).
