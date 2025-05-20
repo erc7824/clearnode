@@ -15,6 +15,7 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/shopspring/decimal"
 	"gorm.io/gorm"
 )
 
@@ -24,17 +25,19 @@ var (
 
 // Custody implements the BlockchainClient interface using the Custody contract
 type Custody struct {
-	client       *ethclient.Client
-	custody      *nitrolite.Custody
-	ledger       *Ledger
-	custodyAddr  common.Address
-	transactOpts *bind.TransactOpts
-	networkID    string
-	signer       *Signer
+	client            *ethclient.Client
+	custody           *nitrolite.Custody
+	db                *gorm.DB
+	custodyAddr       common.Address
+	transactOpts      *bind.TransactOpts
+	chainID           uint32
+	signer            *Signer
+	sendBalanceUpdate func(string)
+	sendChannelUpdate func(Channel)
 }
 
 // NewCustody initializes the Ethereum client and custody contract wrapper.
-func NewCustody(signer *Signer, ledger *Ledger, infuraURL, custodyAddressStr, networkID string) (*Custody, error) {
+func NewCustody(signer *Signer, db *gorm.DB, sendBalanceUpdate func(string), sendChannelUpdate func(Channel), infuraURL, custodyAddressStr string, chain uint32) (*Custody, error) {
 	custodyAddress := common.HexToAddress(custodyAddressStr)
 	client, err := ethclient.Dial(infuraURL)
 	if err != nil {
@@ -60,20 +63,21 @@ func NewCustody(signer *Signer, ledger *Ledger, infuraURL, custodyAddressStr, ne
 	}
 
 	return &Custody{
-		client:       client,
-		custody:      custody,
-		ledger:       ledger,
-		custodyAddr:  custodyAddress,
-		transactOpts: auth,
-		networkID:    networkID,
-		signer:       signer,
+		client:            client,
+		custody:           custody,
+		db:                db,
+		custodyAddr:       custodyAddress,
+		transactOpts:      auth,
+		chainID:           uint32(chainID.Int64()),
+		signer:            signer,
+		sendBalanceUpdate: sendBalanceUpdate,
 	}, nil
 }
 
 // ListenEvents initializes event listening for the custody contract
 func (c *Custody) ListenEvents(ctx context.Context) {
 	// TODO: store processed events in a database
-	listenEvents(ctx, c.client, c.networkID, c.custodyAddr, c.networkID, 0, c.handleBlockChainEvent)
+	listenEvents(ctx, c.client, c.custodyAddr, c.chainID, 0, c.handleBlockChainEvent)
 }
 
 // Join calls the join method on the custody contract
@@ -126,16 +130,18 @@ func (c *Custody) handleBlockChainEvent(l types.Log) {
 
 		participantA := ev.Channel.Participants[0].Hex()
 		nonce := ev.Channel.Nonce
-		participantB := ev.Channel.Participants[1].Hex()
+		participantB := ev.Channel.Participants[1]
+		tokenAddress := ev.Initial.Allocations[0].Token.Hex()
+		tokenAmount := ev.Initial.Allocations[0].Amount.Int64()
 
 		// Check if channel was created with the broker.
-		if participantB != BrokerAddress {
-			fmt.Printf("participantB [%s] is not Broker[%s]: ", participantB, BrokerAddress)
+		if participantB != c.signer.GetAddress() {
+			fmt.Printf("participantB [%s] is not Broker[%s]: ", participantB, c.signer.GetAddress().Hex())
 			return
 		}
 
 		// Check if there is already existing open channel with the broker
-		existingOpenChannel, err := CheckExistingChannels(c.ledger.db, participantA, participantB, c.networkID)
+		existingOpenChannel, err := CheckExistingChannels(c.db, participantA, tokenAddress, c.chainID)
 		if err != nil {
 			log.Printf("[Created] Error checking channels in database: %v", err)
 			return
@@ -146,19 +152,16 @@ func (c *Custody) handleBlockChainEvent(l types.Log) {
 			return
 		}
 
-		tokenAddress := ev.Initial.Allocations[0].Token.Hex()
-		tokenAmount := ev.Initial.Allocations[0].Amount.Int64()
-
 		channelID := common.BytesToHash(ev.ChannelId[:]).Hex()
-		err = CreateChannel(
-			c.ledger.db,
+		ch, err := CreateChannel(
+			c.db,
 			channelID,
 			participantA,
 			nonce,
 			ev.Channel.Adjudicator.Hex(),
-			c.networkID,
+			c.chainID,
 			tokenAddress,
-			tokenAmount,
+			uint64(tokenAmount),
 		)
 		if err != nil {
 			log.Printf("[ChannelCreated] Error creating/updating channel in database: %v", err)
@@ -176,17 +179,9 @@ func (c *Custody) handleBlockChainEvent(l types.Log) {
 			return
 		}
 
-		log.Printf("[ChannelCreated] Successfully initiated join for channel %s on network %s", channelID, c.networkID)
+		c.sendChannelUpdate(ch)
 
-		log.Printf("[ChannelCreated] Successfully initiated join for channel %s on network %s",
-			channelID, c.networkID)
-
-		account := c.ledger.SelectBeneficiaryAccount(channelID, participantA)
-
-		if err := account.Record(tokenAmount); err != nil {
-			log.Printf("[ChannelCreated] Error recording initial balance for participant A: %v", err)
-			return
-		}
+		log.Printf("[ChannelCreated] Successfully initiated join for channel %s on chain %d", channelID, c.chainID)
 
 	case custodyAbi.Events["Joined"].ID:
 		ev, err := c.custody.ParseJoined(l)
@@ -196,9 +191,9 @@ func (c *Custody) handleBlockChainEvent(l types.Log) {
 		}
 		log.Printf("Joined event data: %+v\n", ev)
 
+		var channel Channel
 		channelID := common.BytesToHash(ev.ChannelId[:]).Hex()
-		err = c.ledger.db.Transaction(func(tx *gorm.DB) error {
-			var channel Channel
+		err = c.db.Transaction(func(tx *gorm.DB) error {
 			result := tx.Where("channel_id = ?", channelID).First(&channel)
 			if result.Error != nil {
 				if errors.Is(result.Error, gorm.ErrRecordNotFound) {
@@ -215,12 +210,31 @@ func (c *Custody) handleBlockChainEvent(l types.Log) {
 			}
 			log.Printf("Joined channel with ID: %s", channelID)
 
+			asset, err := GetAssetByToken(tx, channel.Token, c.chainID)
+			if err != nil {
+				return fmt.Errorf("DB error fetching asset: %w", err)
+			}
+
+			if asset == nil {
+				return fmt.Errorf("Asset not found in database for token: %s", channel.Token)
+			}
+
+			tokenAmount := decimal.NewFromBigInt(big.NewInt(int64(channel.Amount)), -int32(asset.Decimals))
+
+			ledger := GetParticipantLedger(tx, channel.Participant)
+			if err := ledger.Record(channel.Participant, asset.Symbol, tokenAmount); err != nil {
+				log.Printf("[Closed] Error recording balance update for participant A: %v", err)
+				return err
+			}
+
 			return nil
 		})
 		if err != nil {
 			log.Printf("[Joined] Error closing channel in database: %v", err)
 			return
 		}
+		c.sendBalanceUpdate(channel.Participant)
+		c.sendChannelUpdate(channel)
 
 	case custodyAbi.Events["Closed"].ID:
 		ev, err := c.custody.ParseClosed(l)
@@ -230,10 +244,9 @@ func (c *Custody) handleBlockChainEvent(l types.Log) {
 		}
 		log.Printf("Closed event data: %+v\n", ev)
 
+		var channel Channel
 		channelID := common.BytesToHash(ev.ChannelId[:]).Hex()
-
-		err = c.ledger.db.Transaction(func(tx *gorm.DB) error {
-			var channel Channel
+		err = c.db.Transaction(func(tx *gorm.DB) error {
 			result := tx.Where("channel_id = ?", channelID).First(&channel)
 			if result.Error != nil {
 				if errors.Is(result.Error, gorm.ErrRecordNotFound) {
@@ -251,16 +264,19 @@ func (c *Custody) handleBlockChainEvent(l types.Log) {
 				return fmt.Errorf("failed to close channel: %w", err)
 			}
 
-			account := c.ledger.SelectBeneficiaryAccount(channelID, channel.ParticipantA)
-			account.db = tx
-			balance, err := account.Balance()
+			asset, err := GetAssetByToken(tx, channel.Token, c.chainID)
 			if err != nil {
-				log.Printf("[Closed] Error getting balances for participant: %v", err)
-				return err
+				return fmt.Errorf("DB error fetching asset: %w", err)
 			}
 
-			if err := account.Record(-balance); err != nil {
-				log.Printf("[Closed] Error recording initial balance for participant A: %v", err)
+			if asset == nil {
+				return fmt.Errorf("Asset not found in database for token: %s", channel.Token)
+			}
+
+			tokenAmount := decimal.NewFromBigInt(big.NewInt(int64(channel.Amount)), -int32(asset.Decimals))
+			ledger := GetParticipantLedger(tx, channel.Participant)
+			if err := ledger.Record(channel.Participant, asset.Symbol, tokenAmount.Neg()); err != nil {
+				log.Printf("[Closed] Error recording balance update for participant A: %v", err)
 				return err
 			}
 
@@ -272,6 +288,8 @@ func (c *Custody) handleBlockChainEvent(l types.Log) {
 			log.Printf("[Closed] Error closing channel in database: %v", err)
 			return
 		}
+		c.sendBalanceUpdate(channel.Participant)
+		c.sendChannelUpdate(channel)
 
 	case custodyAbi.Events["Resized"].ID:
 		ev, err := c.custody.ParseResized(l)
@@ -284,23 +302,26 @@ func (c *Custody) handleBlockChainEvent(l types.Log) {
 		channelID := common.BytesToHash(ev.ChannelId[:])
 
 		var channel Channel
-		result := c.ledger.db.Where("channel_id = ?", channelID.Hex()).First(&channel)
+		result := c.db.Where("channel_id = ?", channelID.Hex()).First(&channel)
 		if result.Error != nil {
 			log.Println("error finding channel:", result.Error)
 			return
 		}
 
+		newAmount := int64(channel.Amount)
 		for _, change := range ev.DeltaAllocations {
-			channel.Amount += change.Int64()
+			newAmount += change.Int64()
 		}
 
+		channel.Amount = uint64(newAmount)
 		channel.UpdatedAt = time.Now()
 		channel.Version++
-		if err := c.ledger.db.Save(&channel).Error; err != nil {
+		if err := c.db.Save(&channel).Error; err != nil {
 			log.Printf("[Resized] Error saving channel in database: %v", err)
 			return
 		}
 
+		c.sendChannelUpdate(channel)
 	default:
 		fmt.Println("Unknown event ID:", eventID.Hex())
 	}
@@ -309,37 +330,35 @@ func (c *Custody) handleBlockChainEvent(l types.Log) {
 // UpdateBalanceMetrics fetches the broker's account information from the smart contract and updates metrics
 func (c *Custody) UpdateBalanceMetrics(ctx context.Context, tokens []common.Address, metrics *Metrics) {
 	if metrics == nil {
-		logger.Errorw("Metrics not initialized for custody client", "network", c.networkID)
+		logger.Errorw("Metrics not initialized for custody client", "network", c.chainID)
 		return
 	}
 
-	brokerAddr := common.HexToAddress(BrokerAddress)
-
+	brokerAddr := c.signer.GetAddress()
 	for _, token := range tokens {
 		// Create a call opts with the provided context
 		callOpts := &bind.CallOpts{
 			Context: ctx,
 		}
 
-		logger.Infow("Fetching account info", "network", c.networkID, "token", token.Hex(), "broker", brokerAddr.Hex())
+		logger.Infow("Fetching account info", "network", c.chainID, "token", token.Hex(), "broker", brokerAddr.Hex())
 		// Call getAccountInfo on the custody contract
 		info, err := c.custody.GetAccountInfo(callOpts, brokerAddr, token)
 		if err != nil {
-			logger.Errorw("Failed to get account info", "network", c.networkID, "token", token.Hex(), "error", err)
+			logger.Errorw("Failed to get account info", "network", c.chainID, "token", token.Hex(), "error", err)
 			continue
 		}
 
-		// Update the metrics
 		metrics.BrokerBalanceAvailable.With(prometheus.Labels{
-			"network": c.networkID,
+			"network": fmt.Sprintf("%d", c.chainID),
 			"token":   token.Hex(),
 		}).Set(float64(info.Available.Int64()))
 
 		metrics.BrokerChannelCount.With(prometheus.Labels{
-			"network": c.networkID,
+			"network": fmt.Sprintf("%d", c.chainID),
 			"token":   token.Hex(),
 		}).Set(float64(info.ChannelCount.Int64()))
 
-		logger.Infow("Updated contract balance metrics", "network", c.networkID, "token", token.Hex(), "available", info.Available.String(), "channels", info.ChannelCount.String())
+		logger.Infow("Updated contract balance metrics", "network", c.chainID, "token", token.Hex(), "available", info.Available.String(), "channels", info.ChannelCount.String())
 	}
 }

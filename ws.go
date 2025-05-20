@@ -5,38 +5,44 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"math/big"
 	"net/http"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common/hexutil"
+	"github.com/go-playground/validator/v10"
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 	"gorm.io/gorm"
 )
 
+var validate = validator.New()
+
 // UnifiedWSHandler manages WebSocket connections with authentication
 type UnifiedWSHandler struct {
 	signer        *Signer
-	ledger        *Ledger
+	db            *gorm.DB
 	upgrader      websocket.Upgrader
 	connections   map[string]*websocket.Conn
 	connectionsMu sync.RWMutex
 	authManager   *AuthManager
 	metrics       *Metrics
 	rpcStore      *RPCStore
+	config        *Config
 }
 
 func NewUnifiedWSHandler(
 	signer *Signer,
-	ledger *Ledger,
+	db *gorm.DB,
 	metrics *Metrics,
 	rpcStore *RPCStore,
+	config *Config,
 ) *UnifiedWSHandler {
 	return &UnifiedWSHandler{
 		signer: signer,
-		ledger: ledger,
+		db:     db,
 		upgrader: websocket.Upgrader{
 			ReadBufferSize:  1024,
 			WriteBufferSize: 1024,
@@ -48,6 +54,7 @@ func NewUnifiedWSHandler(
 		authManager: NewAuthManager(),
 		metrics:     metrics,
 		rpcStore:    rpcStore,
+		config:      config,
 	}
 }
 
@@ -79,10 +86,16 @@ func (h *UnifiedWSHandler) HandleConnection(w http.ResponseWriter, r *http.Reque
 		// Increment received message counter
 		h.metrics.MessageReceived.Inc()
 
-		var rpcMsg RPCRequest
+		var rpcMsg RPCMessage
 		if err := json.Unmarshal(message, &rpcMsg); err != nil {
 			log.Printf("Invalid message format: %v", err)
-			h.sendErrorResponse(address, nil, nil, conn, "Invalid message format")
+			h.sendErrorResponse(address, nil, conn, "Invalid message format")
+			return
+		}
+
+		if err := validate.Struct(&rpcMsg); err != nil {
+			log.Printf("Invalid message format: %v", err)
+			h.sendErrorResponse(address, nil, conn, "Invalid message format")
 			return
 		}
 
@@ -96,7 +109,7 @@ func (h *UnifiedWSHandler) HandleConnection(w http.ResponseWriter, r *http.Reque
 			err := HandleAuthRequest(h.signer, conn, &rpcMsg, h.authManager)
 			if err != nil {
 				log.Printf("Auth initialization failed: %v", err)
-				h.sendErrorResponse(address, nil, nil, conn, err.Error())
+				h.sendErrorResponse(address, nil, conn, err.Error())
 				h.metrics.AuthFailure.Inc()
 			}
 			continue
@@ -106,7 +119,7 @@ func (h *UnifiedWSHandler) HandleConnection(w http.ResponseWriter, r *http.Reque
 			authAddr, err := HandleAuthVerify(conn, &rpcMsg, h.authManager, h.signer)
 			if err != nil {
 				log.Printf("Authentication verification failed: %v", err)
-				h.sendErrorResponse(address, nil, nil, conn, err.Error())
+				h.sendErrorResponse(address, nil, conn, err.Error())
 				h.metrics.AuthFailure.Inc()
 				continue
 			}
@@ -119,7 +132,7 @@ func (h *UnifiedWSHandler) HandleConnection(w http.ResponseWriter, r *http.Reque
 		default:
 			// Reject any other messages before authentication
 			log.Printf("Unexpected message method during authentication: %s", rpcMsg.Req.Method)
-			h.sendErrorResponse(address, nil, nil, conn, "Authentication required. Please send auth_request first.")
+			h.sendErrorResponse(address, nil, conn, "Authentication required. Please send auth_request first.")
 		}
 	}
 
@@ -139,6 +152,17 @@ func (h *UnifiedWSHandler) HandleConnection(w http.ResponseWriter, r *http.Reque
 
 	log.Printf("Participant authenticated: %s", address)
 
+	// Send initial balance and channels information in form of balance and channel updates
+	h.sendBalanceUpdate(address)
+	channels, err := getChannelsForParticipant(h.db, address)
+	if err != nil {
+		log.Printf("Error retrieving channels for participant %s: %v", address, err)
+	}
+
+	for _, channel := range channels {
+		h.sendChannelUpdate(channel)
+	}
+
 	for {
 		_, messageBytes, err := conn.ReadMessage()
 		if err != nil {
@@ -156,7 +180,7 @@ func (h *UnifiedWSHandler) HandleConnection(w http.ResponseWriter, r *http.Reque
 		// Check if session is still valid
 		if !h.authManager.ValidateSession(address) {
 			log.Printf("Session expired for participant: %s", address)
-			h.sendErrorResponse(address, nil, nil, conn, "Session expired. Please re-authenticate.")
+			h.sendErrorResponse(address, nil, conn, "Session expired. Please re-authenticate.")
 			break
 		}
 
@@ -164,128 +188,129 @@ func (h *UnifiedWSHandler) HandleConnection(w http.ResponseWriter, r *http.Reque
 		h.authManager.UpdateSession(address)
 
 		// Forward request or response for internal vApp communication.
-		var rpcRequest RPCRequest
-		if err := json.Unmarshal(messageBytes, &rpcRequest); err != nil {
-			var rpcRes RPCResponse
-			if err := json.Unmarshal(messageBytes, &rpcRes); err == nil && rpcRes.AccountID != "" {
-				if err := forwardMessage(rpcRes.AccountID, rpcRes.Res, rpcRes.Sig, messageBytes, address, h); err != nil {
-					log.Printf("Error forwarding message: %v", err)
-					h.sendErrorResponse(address, nil, nil, conn, "Failed to forward message: "+err.Error())
-					continue
-				}
-				continue
-			}
-
-			h.sendErrorResponse(address, nil, nil, conn, "Invalid message format")
+		var msg RPCMessage
+		if err := json.Unmarshal(messageBytes, &msg); err != nil {
+			h.sendErrorResponse(address, nil, conn, "Invalid message format")
 			continue
 		}
 
-		if rpcRequest.AccountID != "" {
-			if err := forwardMessage(rpcRequest.AccountID, rpcRequest.Req, rpcRequest.Sig, messageBytes, address, h); err != nil {
+		if err := validate.Struct(&msg); err != nil {
+			log.Printf("Invalid message format: %v", err)
+			h.sendErrorResponse(address, nil, conn, "Invalid message format")
+			return
+		}
+
+		if msg.AppSessionID != "" {
+			if err := forwardMessage(&msg, messageBytes, address, h); err != nil {
 				log.Printf("Error forwarding message: %v", err)
-				h.sendErrorResponse(address, nil, nil, conn, "Failed to forward message: "+err.Error())
+				h.sendErrorResponse(address, nil, conn, "Failed to forward message: "+err.Error())
 				continue
 			}
 			continue
 		}
 
-		var rpcResponse = &RPCResponse{}
+		if msg.Req == nil {
+			continue
+		}
+
+		var rpcResponse = &RPCMessage{}
 		var handlerErr error
 
 		// Track RPC request by method
-		h.metrics.RPCRequests.WithLabelValues(rpcRequest.Req.Method).Inc()
+		h.metrics.RPCRequests.WithLabelValues(msg.Req.Method).Inc()
 
-		switch rpcRequest.Req.Method {
+		switch msg.Req.Method {
 		case "ping":
-			rpcResponse, handlerErr = HandlePing(&rpcRequest)
+			rpcResponse, handlerErr = HandlePing(&msg)
 			if handlerErr != nil {
 				log.Printf("Error handling ping: %v", handlerErr)
-				h.sendErrorResponse(address, &rpcRequest.Req, rpcRequest.Sig, conn, "Failed to process ping: "+handlerErr.Error())
+				h.sendErrorResponse(address, &msg, conn, "Failed to process ping: "+handlerErr.Error())
 				continue
 			}
 
 		case "get_config":
-			rpcResponse, handlerErr = HandleGetConfig(&rpcRequest)
+			rpcResponse, handlerErr = HandleGetConfig(&msg, h.config, h.signer)
 			if handlerErr != nil {
 				log.Printf("Error handling get_config: %v", handlerErr)
-				h.sendErrorResponse(address, &rpcRequest.Req, rpcRequest.Sig, conn, "Failed to get config: "+handlerErr.Error())
+				h.sendErrorResponse(address, &msg, conn, "Failed to get config: "+handlerErr.Error())
 				continue
 			}
 
 		case "get_ledger_balances":
-			rpcResponse, handlerErr = HandleGetLedgerBalances(&rpcRequest, h.ledger)
+			rpcResponse, handlerErr = HandleGetLedgerBalances(&msg, address, h.db)
 			if handlerErr != nil {
 				log.Printf("Error handling get_ledger_balances: %v", handlerErr)
-				h.sendErrorResponse(address, &rpcRequest.Req, rpcRequest.Sig, conn, "Failed to get ledger balances: "+handlerErr.Error())
+				h.sendErrorResponse(address, &msg, conn, "Failed to get ledger balances: "+handlerErr.Error())
 				continue
 			}
 
 		case "get_app_definition":
-			rpcResponse, handlerErr = HandleGetAppDefinition(&rpcRequest, h.ledger)
+			rpcResponse, handlerErr = HandleGetAppDefinition(&msg, h.db)
 			if handlerErr != nil {
 				log.Printf("Error handling get_app_definition: %v", handlerErr)
-				h.sendErrorResponse(address, &rpcRequest.Req, rpcRequest.Sig, conn, "Failed to get app definition: "+handlerErr.Error())
+				h.sendErrorResponse(address, &msg, conn, "Failed to get app definition: "+handlerErr.Error())
 				continue
 			}
 
 		case "create_app_session":
-			rpcResponse, handlerErr = HandleCreateApplication(&rpcRequest, h.ledger)
+			rpcResponse, handlerErr = HandleCreateApplication(&msg, h.db)
 			if handlerErr != nil {
 				log.Printf("Error handling create_app_session: %v", handlerErr)
-				h.sendErrorResponse(address, &rpcRequest.Req, rpcRequest.Sig, conn, "Failed to create application: "+handlerErr.Error())
+				h.sendErrorResponse(address, &msg, conn, "Failed to create application: "+handlerErr.Error())
 				continue
 			}
+			h.sendBalanceUpdate(address)
 
 		case "close_app_session":
-			rpcResponse, handlerErr = HandleCloseApplication(&rpcRequest, h.ledger)
+			rpcResponse, handlerErr = HandleCloseApplication(&msg, h.db)
 			if handlerErr != nil {
 				log.Printf("Error handling close_app_session: %v", handlerErr)
-				h.sendErrorResponse(address, &rpcRequest.Req, rpcRequest.Sig, conn, "Failed to close application: "+handlerErr.Error())
+				h.sendErrorResponse(address, &msg, conn, "Failed to close application: "+handlerErr.Error())
 				continue
 			}
-
+			h.sendBalanceUpdate(address)
 		case "resize_channel":
-			rpcResponse, handlerErr = HandleResizeChannel(&rpcRequest, h.ledger, h.signer)
+			rpcResponse, handlerErr = HandleResizeChannel(&msg, h.db, h.signer)
 			if handlerErr != nil {
 				log.Printf("Error handling resize_channel: %v", handlerErr)
-				h.sendErrorResponse(address, &rpcRequest.Req, rpcRequest.Sig, conn, "Failed to resize channel: "+handlerErr.Error())
+				h.sendErrorResponse(address, &msg, conn, "Failed to resize channel: "+handlerErr.Error())
 				continue
 			}
 
 		case "close_channel":
-			rpcResponse, handlerErr = HandleCloseChannel(&rpcRequest, h.ledger, h.signer)
+			rpcResponse, handlerErr = HandleCloseChannel(&msg, h.db, h.signer)
 			if handlerErr != nil {
 				log.Printf("Error handling close_channel: %v", handlerErr)
-				h.sendErrorResponse(address, &rpcRequest.Req, rpcRequest.Sig, conn, "Failed to close channel: "+handlerErr.Error())
+				h.sendErrorResponse(address, &msg, conn, "Failed to close channel: "+handlerErr.Error())
 				continue
 			}
 		case "get_channels":
-			rpcResponse, handlerErr = HandleGetChannels(&rpcRequest, h.ledger)
+			rpcResponse, handlerErr = HandleGetChannels(&msg, h.db)
 			if handlerErr != nil {
 				log.Printf("Error handling get_channels: %v", handlerErr)
-				h.sendErrorResponse(address, &rpcRequest.Req, rpcRequest.Sig, conn, "Failed to get channels: "+handlerErr.Error())
+				h.sendErrorResponse(address, &msg, conn, "Failed to get channels: "+handlerErr.Error())
 				continue
 			}
 		case "get_rpc_history":
-			rpcResponse, handlerErr = HandleGetRPCHistory(address, &rpcRequest, h.rpcStore)
+			rpcResponse, handlerErr = HandleGetRPCHistory(address, &msg, h.rpcStore)
 			if handlerErr != nil {
 				log.Printf("Error handling get_rpc_history: %v", handlerErr)
-				h.sendErrorResponse(address, &rpcRequest.Req, rpcRequest.Sig, conn, "Failed to get RPC history: "+handlerErr.Error())
+				h.sendErrorResponse(address, &msg, conn, "Failed to get RPC history: "+handlerErr.Error())
 				continue
 			}
 
 		default:
-			h.sendErrorResponse(address, &rpcRequest.Req, rpcRequest.Sig, conn, "Unsupported method")
+			h.sendErrorResponse(address, &msg, conn, "Unsupported method")
 			continue
 		}
 
 		// For broker methods, send back a signed RPC response.
-		byteData, _ := json.Marshal(rpcResponse.Res)
+		byteData, _ := json.Marshal(rpcResponse.Req)
 		signature, _ := h.signer.Sign(byteData)
 		rpcResponse.Sig = []string{hexutil.Encode(signature)}
 		wsResponseData, _ := json.Marshal(rpcResponse)
 
-		if err := h.rpcStore.StoreMessage(address, &rpcRequest.Req, rpcRequest.Sig, byteData, rpcResponse.Sig); err != nil {
+		if err := h.rpcStore.StoreMessage(address, msg.Req, msg.Sig, byteData, rpcResponse.Sig); err != nil {
 			log.Printf("Failed to store RPC message: %v", err)
 			// continue processing even if storage fails
 		}
@@ -314,14 +339,21 @@ func (h *UnifiedWSHandler) HandleConnection(w http.ResponseWriter, r *http.Reque
 }
 
 // forwardMessage forwards an RPC message to all recipients in a virtual app
-func forwardMessage(appID string, rpcData RPCData, signatures []string, msg []byte, fromAddress string, h *UnifiedWSHandler) error {
-	reqBytes, err := json.Marshal(rpcData)
+func forwardMessage(rpc *RPCMessage, msg []byte, fromAddress string, h *UnifiedWSHandler) error {
+	var data *RPCData
+	if rpc.Req != nil {
+		data = rpc.Req
+	} else {
+		data = rpc.Res
+	}
+
+	reqBytes, err := json.Marshal(data)
 	if err != nil {
 		return errors.New("Error validating signature: " + err.Error())
 	}
 
 	recoveredAddresses := map[string]bool{}
-	for _, sig := range signatures {
+	for _, sig := range rpc.Sig {
 		addr, err := RecoverAddress(reqBytes, sig)
 		if err != nil {
 			return errors.New("invalid signature: " + err.Error())
@@ -333,85 +365,13 @@ func forwardMessage(appID string, rpcData RPCData, signatures []string, msg []by
 		return errors.New("unauthorized: invalid signature or sender is not a participant of this vApp")
 	}
 
-	var participants []string
-	err = h.ledger.db.Transaction(func(tx *gorm.DB) error {
-		var vApp VApp
-		if err := tx.Where("app_id = ?", appID).First(&vApp).Error; err != nil {
-			return errors.New("failed to find virtual app: " + err.Error())
-		}
-		participants = vApp.Participants
-
-		// TODO: we currently skip intent as in current rpc it is not securely signed.
-		intent := []int64{}
-		// Update ledger with the new intent if present
-		if len(intent) != 0 {
-			participantWeights := make(map[string]int64, len(vApp.Participants))
-			for i, addr := range vApp.Participants {
-				participantWeights[strings.ToLower(addr)] = vApp.Weights[i]
-			}
-
-			var totalWeight int64
-			for addr := range recoveredAddresses {
-				if w, ok := participantWeights[strings.ToLower(addr)]; ok && w > 0 {
-					totalWeight += w
-				}
-			}
-
-			// Update only if the quorum is met
-			if totalWeight < int64(vApp.Quorum) {
-				return fmt.Errorf("quorum to apply intent is not met: %d/%d", totalWeight, vApp.Quorum)
-			}
-
-			if len(participants) != len(intent) {
-				return errors.New("Invalid intent length")
-			}
-
-			var totalIntent int64 = 0
-			for _, value := range intent {
-				totalIntent += value
-			}
-			if totalIntent != 0 {
-				return errors.New("Invalid intent: sum of all intents must be 0")
-			}
-
-			participantsBalances, err := GetAccountBalances(tx, appID)
-			if err != nil {
-				return errors.New("Failed to get participant balance: " + err.Error())
-			}
-
-			for i, participantBalance := range participantsBalances {
-				if participantBalance.Amount+intent[i] < 0 {
-					return errors.New("Invalid intent: insufficient balance for participant " + participantBalance.Address)
-				}
-			}
-
-			// Iterate over participants to keep same order with intent
-			for i, participant := range participants {
-				account := h.ledger.SelectBeneficiaryAccount(appID, participant)
-				if err := account.Record(intent[i]); err != nil {
-					return errors.New("Failed to record intent: " + err.Error())
-				}
-			}
-
-			// Update the virtual app version in the database
-			if rpcData.Timestamp <= vApp.Version {
-				return errors.New("outdated request")
-			}
-
-			vApp.Version = rpcData.Timestamp
-			if err := tx.Save(&vApp).Error; err != nil {
-				return errors.New("failed to update vapp version: " + err.Error())
-			}
-		}
-		return nil
-	})
-
-	if err != nil {
-		return err
+	var vApp AppSession
+	if err := h.db.Where("session_id = ?", rpc.AppSessionID).First(&vApp).Error; err != nil {
+		return errors.New("failed to find virtual app session: " + err.Error())
 	}
 
 	// Iterate over all recipients in a virtual app and send the message
-	for _, recipient := range participants {
+	for _, recipient := range vApp.Participants {
 		if recipient == fromAddress {
 			continue
 		}
@@ -452,16 +412,16 @@ func forwardMessage(appID string, rpcData RPCData, signatures []string, msg []by
 }
 
 // sendErrorResponse creates and sends an error response to the client
-func (h *UnifiedWSHandler) sendErrorResponse(sender string, req *RPCData, sig []string, conn *websocket.Conn, errMsg string) {
+func (h *UnifiedWSHandler) sendErrorResponse(sender string, rpc *RPCMessage, conn *websocket.Conn, errMsg string) {
 	reqID := uint64(0)
-	if req != nil {
-		reqID = req.RequestID
+	if rpc != nil && rpc.Req != nil {
+		reqID = rpc.Req.RequestID
 	}
 	response := CreateResponse(reqID, "error", []any{map[string]any{
 		"error": errMsg,
 	}}, time.Now())
 
-	byteData, _ := json.Marshal(response.Res)
+	byteData, _ := json.Marshal(response.Req)
 	signature, _ := h.signer.Sign(byteData)
 	response.Sig = []string{hexutil.Encode(signature)}
 
@@ -471,8 +431,8 @@ func (h *UnifiedWSHandler) sendErrorResponse(sender string, req *RPCData, sig []
 		return
 	}
 
-	if req != nil {
-		if err := h.rpcStore.StoreMessage(sender, req, sig, byteData, response.Sig); err != nil {
+	if rpc != nil && rpc.Req != nil {
+		if err := h.rpcStore.StoreMessage(sender, rpc.Req, rpc.Sig, byteData, response.Sig); err != nil {
 			log.Printf("Failed to store RPC message: %v", err)
 			// continue processing even if storage fails
 		}
@@ -505,6 +465,114 @@ func (h *UnifiedWSHandler) sendErrorResponse(sender string, req *RPCData, sig []
 	conn.SetWriteDeadline(time.Time{})
 }
 
+// sendErrorResponse creates and sends an error response to the client
+func (h *UnifiedWSHandler) sendBalanceUpdate(sender string) {
+	balances, err := GetParticipantLedger(h.db, sender).GetBalances(sender)
+	response := CreateResponse(uint64(time.Now().UnixNano()), "bu", []any{balances}, time.Now())
+
+	byteData, _ := json.Marshal(response.Req)
+	signature, _ := h.signer.Sign(byteData)
+	response.Sig = []string{hexutil.Encode(signature)}
+
+	responseData, err := json.Marshal(response)
+	if err != nil {
+		log.Printf("Error marshaling error response: %v", err)
+		return
+	}
+
+	h.connectionsMu.RLock()
+	recipientConn, exists := h.connections[sender]
+	h.connectionsMu.RUnlock()
+	if exists {
+		// Use NextWriter for safer message delivery
+		w, err := recipientConn.NextWriter(websocket.TextMessage)
+		if err != nil {
+			log.Printf("Error getting writer for balance update to %s: %v", sender, err)
+			return
+		}
+
+		if _, err := w.Write(responseData); err != nil {
+			log.Printf("Error writing balance update to %s: %v", sender, err)
+			w.Close()
+			return
+		}
+
+		if err := w.Close(); err != nil {
+			log.Printf("Error closing writer for balance update to %s: %v", sender, err)
+			return
+		}
+
+		// Increment sent message counter for each forwarded message
+		h.metrics.MessageSent.Inc()
+
+		log.Printf("Successfully forwarded message to %s", sender)
+	} else {
+		log.Printf("Recipient %s not connected", sender)
+		return
+	}
+}
+
+// sendErrorResponse creates and sends an error response to the client
+func (h *UnifiedWSHandler) sendChannelUpdate(channel Channel) {
+	response := CreateResponse(uint64(time.Now().UnixNano()), "cu", []any{
+		ChannelResponse{
+			ChannelID:   channel.ChannelID,
+			Participant: channel.Participant,
+			Status:      channel.Status,
+			Token:       channel.Token,
+			Amount:      big.NewInt(int64(channel.Amount)),
+			ChainID:     channel.ChainID,
+			Adjudicator: channel.Adjudicator,
+			Challenge:   channel.Challenge,
+			Nonce:       channel.Nonce,
+			Version:     channel.Version,
+			CreatedAt:   channel.CreatedAt.Format(time.RFC3339),
+			UpdatedAt:   channel.UpdatedAt.Format(time.RFC3339),
+		},
+	}, time.Now())
+
+	byteData, _ := json.Marshal(response.Req)
+	signature, _ := h.signer.Sign(byteData)
+	response.Sig = []string{hexutil.Encode(signature)}
+
+	responseData, err := json.Marshal(response)
+	if err != nil {
+		log.Printf("Error marshaling error response: %v", err)
+		return
+	}
+
+	h.connectionsMu.RLock()
+	recipientConn, exists := h.connections[channel.Participant]
+	h.connectionsMu.RUnlock()
+	if exists {
+		// Use NextWriter for safer message delivery
+		w, err := recipientConn.NextWriter(websocket.TextMessage)
+		if err != nil {
+			log.Printf("Error getting writer for balance update to %s: %v", channel.Participant, err)
+			return
+		}
+
+		if _, err := w.Write(responseData); err != nil {
+			log.Printf("Error writing balance update to %s: %v", channel.Participant, err)
+			w.Close()
+			return
+		}
+
+		if err := w.Close(); err != nil {
+			log.Printf("Error closing writer for balance update to %s: %v", channel.Participant, err)
+			return
+		}
+
+		// Increment sent message counter for each forwarded message
+		h.metrics.MessageSent.Inc()
+
+		log.Printf("Successfully forwarded message to %s", channel.Participant)
+	} else {
+		log.Printf("Recipient %s not connected", channel.Participant)
+		return
+	}
+}
+
 // CloseAllConnections closes all open WebSocket connections during shutdown
 func (h *UnifiedWSHandler) CloseAllConnections() {
 	h.connectionsMu.RLock()
@@ -528,7 +596,7 @@ type AuthVerifyParams struct {
 }
 
 // HandleAuthRequest initializes the authentication process by generating a challenge
-func HandleAuthRequest(signer *Signer, conn *websocket.Conn, rpc *RPCRequest, authManager *AuthManager) error {
+func HandleAuthRequest(signer *Signer, conn *websocket.Conn, rpc *RPCMessage, authManager *AuthManager) error {
 	// Parse the parameters
 	if len(rpc.Req.Params) < 1 {
 		return errors.New("missing parameters")
@@ -554,7 +622,7 @@ func HandleAuthRequest(signer *Signer, conn *websocket.Conn, rpc *RPCRequest, au
 	response := CreateResponse(rpc.Req.RequestID, "auth_challenge", []any{challengeRes}, time.Now())
 
 	// Sign the response with the server's key
-	resBytes, _ := json.Marshal(response.Res)
+	resBytes, _ := json.Marshal(response.Req)
 	signature, _ := signer.Sign(resBytes)
 	response.Sig = []string{hexutil.Encode(signature)}
 
@@ -564,7 +632,7 @@ func HandleAuthRequest(signer *Signer, conn *websocket.Conn, rpc *RPCRequest, au
 }
 
 // HandleAuthVerify verifies an authentication response to a challenge
-func HandleAuthVerify(conn *websocket.Conn, rpc *RPCRequest, authManager *AuthManager, signer *Signer) (string, error) {
+func HandleAuthVerify(conn *websocket.Conn, rpc *RPCMessage, authManager *AuthManager, signer *Signer) (string, error) {
 	if len(rpc.Req.Params) < 1 {
 		return "", errors.New("missing parameters")
 	}
@@ -612,7 +680,7 @@ func HandleAuthVerify(conn *websocket.Conn, rpc *RPCRequest, authManager *AuthMa
 	}}, time.Now())
 
 	// Sign the response with the server's key
-	resBytes, _ := json.Marshal(response.Res)
+	resBytes, _ := json.Marshal(response.Req)
 	signature, _ := signer.Sign(resBytes)
 	response.Sig = []string{hexutil.Encode(signature)}
 

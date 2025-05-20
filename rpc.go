@@ -7,20 +7,12 @@ import (
 	"time"
 )
 
-// RPCRequest represents a complete message in the RPC protocol, including request data and signatures
-type RPCRequest struct {
-	Req       RPCData  `json:"req"`
-	AccountID string   `json:"acc,omitempty"` // If specified, message is sent into the virtual app.
-	Intent    []int64  `json:"int,omitempty"` // Allocation intent change
-	Sig       []string `json:"sig"`
-}
-
-// RPCResponse represents a response in the RPC protocol
-type RPCResponse struct {
-	Res       RPCData  `json:"res"`
-	AccountID string   `json:"acc,omitempty"` // If specified, message is sent into the virtual app.
-	Intent    []int64  `json:"int,omitempty"` // Allocation intent change
-	Sig       []string `json:"sig"`
+// RPCMessage represents a complete message in the RPC protocol, including data and signatures
+type RPCMessage struct {
+	Req          *RPCData `json:"req,omitempty" validate:"required_without=Res,excluded_with=Res"`
+	Res          *RPCData `json:"res,omitempty" validate:"required_without=Req,excluded_with=Req"`
+	AppSessionID string   `json:"sid,omitempty"` // If specified, message is delivered to the virtual app session participants.
+	Sig          []string `json:"sig"`
 }
 
 // RPCData represents the common structure for both requests and responses
@@ -33,8 +25,8 @@ type RPCData struct {
 }
 
 // ParseRPCMessage parses a JSON string into a RPCRequest
-func ParseRPCMessage(data []byte) (*RPCRequest, error) {
-	var req RPCRequest
+func ParseRPCMessage(data []byte) (*RPCMessage, error) {
+	var req RPCMessage
 	if err := json.Unmarshal(data, &req); err != nil {
 		return nil, fmt.Errorf("failed to parse request: %w", err)
 	}
@@ -42,10 +34,10 @@ func ParseRPCMessage(data []byte) (*RPCRequest, error) {
 }
 
 // CreateResponse creates a response from a request with the given fields
-func CreateResponse(requestID uint64, method string, responseParams []any, newTimestamp time.Time) *RPCResponse {
-	return &RPCResponse{
-		Res: RPCData{
-			RequestID: requestID,
+func CreateResponse(id uint64, method string, responseParams []any, newTimestamp time.Time) *RPCMessage {
+	return &RPCMessage{
+		Res: &RPCData{
+			RequestID: id,
 			Method:    method,
 			Params:    responseParams,
 			Timestamp: uint64(newTimestamp.Unix()),
@@ -70,7 +62,7 @@ func (m *RPCData) UnmarshalJSON(data []byte) error {
 	// Parse RequestID (uint64)
 	var requestID uint64
 	if err := json.Unmarshal(rawMsg[0], &requestID); err != nil {
-		return fmt.Errorf("invalid request_id: %w", err)
+		return fmt.Errorf("invalid rpc message id: %w", err)
 	}
 	m.RequestID = uint64(requestID)
 

@@ -1,167 +1,96 @@
 package main
 
 import (
-	"errors"
 	"fmt"
 	"time"
 
+	"github.com/shopspring/decimal"
 	"gorm.io/gorm"
 )
 
 // Entry represents a ledger entry in the database
 type Entry struct {
-	ID          uint   `gorm:"primaryKey"`
-	AccountID   string `gorm:"column:account_id;not null"`
-	Beneficiary string `gorm:"column:beneficiary;not null"`
-	Credit      int64  `gorm:"column:credit;not null"`
-	Debit       int64  `gorm:"column:debit;not null"`
+	ID          uint            `gorm:"primaryKey"`
+	AccountID   string          `gorm:"column:account_id;not null;index:idx_account_asset_symbol;index:idx_account_participant"`
+	AccountType AccountType     `gorm:"column:account_type;not null"`
+	AssetSymbol string          `gorm:"column:asset_symbol;not null;index:idx_account_asset_symbol"`
+	Participant string          `gorm:"column:participant;not null;index:idx_account_participant"`
+	Credit      decimal.Decimal `gorm:"column:credit;type:decimal(38,18);not null"`
+	Debit       decimal.Decimal `gorm:"column:debit;type:decimal(38,18);not null"`
 	CreatedAt   time.Time
 }
 
-// TableName specifies the table name for the Entry model
 func (Entry) TableName() string {
 	return "ledger"
 }
 
-// BeneficiaryAccount represents an account in the ledger system
-type BeneficiaryAccount struct {
-	AccountID   string
-	Beneficiary string
+type ParticipantLedger struct {
+	participant string
 	db          *gorm.DB
 }
 
-// Ledger represents the ledger service
-type Ledger struct {
-	db *gorm.DB
+func GetParticipantLedger(db *gorm.DB, participant string) *ParticipantLedger {
+	return &ParticipantLedger{participant: participant, db: db}
 }
 
-// NewLedger creates a new ledger instance
-func NewLedger(db *gorm.DB) *Ledger {
-	return &Ledger{
-		db: db,
-	}
-}
-
-// Account creates an Account instance for the given parameters
-func (l *Ledger) SelectBeneficiaryAccount(channelID, beneficiary string) *BeneficiaryAccount {
-	return &BeneficiaryAccount{
-		AccountID:   channelID,
-		Beneficiary: beneficiary,
-		db:          l.db,
-	}
-}
-
-// Balance returns the current balance (credit - debit) for this account
-func (a *BeneficiaryAccount) Balance() (int64, error) {
-	var creditSum, debitSum int64
-
-	err := a.db.Model(&Entry{}).
-		Where("account_id = ? AND beneficiary = ?",
-			a.AccountID, a.Beneficiary).
-		Select("COALESCE(SUM(credit), 0) as credit_sum, COALESCE(SUM(debit), 0) as debit_sum").
-		Row().Scan(&creditSum, &debitSum)
-
-	if err != nil {
-		return 0, err
-	}
-
-	return creditSum - debitSum, nil
-}
-
-// Balances returns the balances for all token addresses for this account
-func GetAccountBalances(db *gorm.DB, accountID string) ([]AvailableBalance, error) {
-	type BalanceResult struct {
-		Beneficiary string
-		CreditSum   int64
-		DebitSum    int64
-	}
-
-	var results []BalanceResult
-	err := db.Model(&Entry{}).
-		Where("account_id = ?", accountID).
-		Select("beneficiary, COALESCE(SUM(credit), 0) as credit_sum, COALESCE(SUM(debit), 0) as debit_sum").
-		Group("beneficiary").
-		Scan(&results).Error
-
-	if err != nil {
-		return nil, err
-	}
-
-	var balances []AvailableBalance
-	for _, r := range results {
-		balances = append(balances, AvailableBalance{
-			Address: r.Beneficiary,
-			Amount:  r.CreditSum - r.DebitSum,
-		})
-	}
-
-	return balances, nil
-}
-
-// Record creates a new ledger entry for this account
-// If amount > 0, it records a credit; if amount < 0, it records a debit
-func (a *BeneficiaryAccount) Record(amount int64) error {
+func (l *ParticipantLedger) Record(accountID string, assetSymbol string, amount decimal.Decimal) error {
 	entry := &Entry{
-		AccountID:   a.AccountID,
-		Beneficiary: a.Beneficiary,
-		Credit:      0,
-		Debit:       0,
+		AccountID:   accountID,
+		Participant: l.participant,
+		AssetSymbol: assetSymbol,
+		Credit:      decimal.Zero,
+		Debit:       decimal.Zero,
 		CreatedAt:   time.Now(),
 	}
 
-	if amount > 0 {
+	if amount.IsPositive() {
 		entry.Credit = amount
-	} else if amount < 0 {
-		entry.Debit = -amount // Convert negative to positive for debit
+	} else if amount.IsNegative() {
+		entry.Debit = amount.Abs()
 	} else {
-		// return errors.New("amount cannot be zero") // Uncomment if you want to disallow zero amounts
+		return nil
 	}
 
-	return a.db.Create(entry).Error
+	fmt.Println("recording entry for: ", l.participant, " in account ", accountID, " ", assetSymbol, " ", amount)
+	return l.db.Create(entry).Error
 }
 
-// Transfer moves funds from this account to another account
-func (a *BeneficiaryAccount) Transfer(toAccount *BeneficiaryAccount, amount int64) error {
-	fmt.Println("transferring amount:", amount)
-	if amount < 0 {
-		return errors.New("transfer amount must be positive")
+func (l *ParticipantLedger) Balance(accountID string, assetSymbol string) (decimal.Decimal, error) {
+	type result struct {
+		Balance decimal.Decimal `gorm:"column:balance"`
+	}
+	var res result
+	if err := l.db.Model(&Entry{}).
+		Where("account_id = ? AND asset_symbol = ? AND participant = ?", accountID, assetSymbol, l.participant).
+		Select("COALESCE(SUM(credit),0) - COALESCE(SUM(debit),0) AS balance").
+		Scan(&res).Error; err != nil {
+		return decimal.Zero, err
+	}
+	return res.Balance, nil
+}
+
+func (l *ParticipantLedger) GetBalances(accountID string) ([]Balance, error) {
+	type row struct {
+		Asset   string          `gorm:"column:asset_symbol"`
+		Balance decimal.Decimal `gorm:"column:balance"`
 	}
 
-	// Check if the source account has sufficient funds
-	balance, err := a.Balance()
-	if err != nil {
-		return err
+	var rows []row
+	if err := l.db.
+		Model(&Entry{}).
+		Where("account_id = ? AND participant = ?", accountID, l.participant).
+		Select("asset_symbol", "COALESCE(SUM(credit),0) - COALESCE(SUM(debit),0) AS balance").
+		Group("asset_symbol").
+		Scan(&rows).Error; err != nil {
+		return nil, err
 	}
 
-	if balance < amount {
-		return errors.New("insufficient funds for transfer")
+	balances := make([]Balance, len(rows))
+	for i, r := range rows {
+		balances[i] = Balance{
+			Asset:  r.Asset,
+			Amount: r.Balance,
+		}
 	}
-
-	// Use a transaction to ensure atomicity
-	return a.db.Transaction(func(tx *gorm.DB) error {
-		// Create a temporary account with transaction db
-		fromAccount := &BeneficiaryAccount{
-			AccountID:   a.AccountID,
-			Beneficiary: a.Beneficiary,
-			db:          tx,
-		}
-
-		toAccountTx := &BeneficiaryAccount{
-			AccountID:   toAccount.AccountID,
-			Beneficiary: toAccount.Beneficiary,
-			db:          tx,
-		}
-
-		// Debit the source account
-		if err := fromAccount.Record(-amount); err != nil {
-			return err
-		}
-
-		// Credit the destination account
-		if err := toAccountTx.Record(amount); err != nil {
-			return err
-		}
-
-		return nil
-	})
+	return balances, nil
 }

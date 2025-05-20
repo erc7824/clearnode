@@ -8,16 +8,15 @@
 | `auth_challenge` | Server response with authentication challenge |
 | `auth_verify` | Completes authentication with a challenge response |
 | `ping` | Simple connectivity check |
-| `get_config` | Retrieves broker configuration |
+| `get_config` | Retrieves broker configuration and supported networks |
 | `get_app_definition` | Retrieves application definition for a ledger account |
 | `get_ledger_balances` | Lists participants and their balances for a ledger account |
-| `get_channels` | Lists all channels for a participant with their status |
+| `get_channels` | Lists all channels for a participant with their status across all chains |
 | `get_rpc_history` | Retrieves all RPC message history for a participant |
 | `create_app_session` | Creates a new virtual application on a ledger |
 | `close_app_session` | Closes a virtual application |
 | `close_channel` | Closes a payment channel |
 | `resize_channel` | Adjusts channel capacity |
-| `message` | Sends a message to all participants in a virtual application |
 
 ## Authentication
 
@@ -87,8 +86,8 @@ Retrieves the application definition for a specific ledger account.
 
 ```json
 {
-  "req": [2, "get_app_definition", [{
-    "acc": "0x1234567890abcdef..."
+  "req": [1, "get_app_definition", [{
+    "app_session_id": "0x1234567890abcdef..."
   }], 1619123456789],
   "sig": ["0x9876fedcba..."]
 }
@@ -98,7 +97,7 @@ Retrieves the application definition for a specific ledger account.
 
 ```json
 {
-  "res": [2, "get_app_definition", [
+  "res": [1, "get_app_definition", [
     {
       "protocol": "NitroRPC/0.2",
       "participants": [
@@ -123,40 +122,7 @@ Retrieves the balances of all participants in a specific ledger account.
 
 ```json
 {
-  "req": [2, "get_ledger_balances", [{
-    "acc": "0x1234567890abcdef..."
-  }], 1619123456789],
-  "sig": ["0x9876fedcba..."]
-}
-```
-
-**Response:**
-
-```json
-{
-  "res": [2, "get_ledger_balances", [[
-    {
-      "address": "0x1234567890abcdef...",
-      "amount": 100000
-    },
-    {
-      "address": "0x2345678901abcdef...",
-      "amount": 200000
-    }
-  ]], 1619123456789],
-  "sig": ["0xabcd1234..."]
-}
-```
-
-### Get Channels
-
-Retrieves all channels for a participant (both open, closed, and joining), ordered by creation date (newest first).
-
-**Request:**
-
-```json
-{
-  "req": [3, "get_channels", [{
+  "req": [1, "get_ledger_balances", [{
     "participant": "0x1234567890abcdef..."
   }], 1619123456789],
   "sig": ["0x9876fedcba..."]
@@ -167,14 +133,51 @@ Retrieves all channels for a participant (both open, closed, and joining), order
 
 ```json
 {
-  "res": [3, "get_channels", [[
+  "res": [1, "get_ledger_balances", [[
+    {
+      "asset": "usdc",
+      "amount": "100.0"
+    },
+    {
+      "asset": "eth",
+      "amount": "0.5"
+    }
+  ]], 1619123456789],
+  "sig": ["0xabcd1234..."]
+}
+```
+
+### Get Channels
+
+Retrieves all channels for a participant (both open, closed, and joining), ordered by creation date (newest first). This method returns channels across all supported chains.
+
+**Request:**
+
+```json
+{
+  "req": [1, "get_channels", [{
+    "participant": "0x1234567890abcdef..."
+  }], 1619123456789],
+  "sig": ["0x9876fedcba..."]
+}
+```
+
+**Response:**
+
+```json
+{
+  "res": [1, "get_channels", [[
     {
       "channel_id": "0xfedcba9876543210...",
       "participant": "0x1234567890abcdef...",
       "status": "open",
       "token": "0xeeee567890abcdef...",
-      "amount": 100000,
-      "network_id": "137",
+      "amount": "100000",
+      "chain_id": 137,
+      "adjudicator": "0xAdjudicatorContractAddress...",
+      "challenge": 86400,
+      "nonce": 1,
+      "version": 2,
       "created_at": "2023-05-01T12:00:00Z",
       "updated_at": "2023-05-01T12:30:00Z"
     },
@@ -183,8 +186,12 @@ Retrieves all channels for a participant (both open, closed, and joining), order
       "participant": "0x1234567890abcdef...",
       "status": "closed",
       "token": "0xeeee567890abcdef...",
-      "amount": 50000,
-      "network_id": "137",
+      "amount": "50000",
+      "chain_id": 42220,
+      "adjudicator": "0xAdjudicatorContractAddress...",
+      "challenge": 86400,
+      "nonce": 1,
+      "version": 3,
       "created_at": "2023-04-15T10:00:00Z",
       "updated_at": "2023-04-20T14:30:00Z"
     }
@@ -197,11 +204,15 @@ The signature in the request must be from the participant's private key, verifyi
 
 Each channel response includes:
 - `channel_id`: Unique identifier for the channel
-- `participant`: The participant's address (always the user who created the channel)
+- `participant`: The participant's address
 - `status`: Current status ("open", "closed", or "joining")
 - `token`: The token address for the channel
 - `amount`: Total channel capacity
-- `network_id`: The blockchain network ID where the channel exists
+- `chain_id`: The blockchain network ID where the channel exists (e.g., 137 for Polygon, 42220 for Celo, 8453 for Base)
+- `adjudicator`: The address of the adjudicator contract 
+- `challenge`: Challenge period duration in seconds
+- `nonce`: Current nonce value for the channel
+- `version`: Current version of the channel state
 - `created_at`: When the channel was created (ISO 8601 format)
 - `updated_at`: When the channel was last updated (ISO 8601 format)
 
@@ -260,7 +271,7 @@ Creates a virtual application between participants.
 
 ```json
 {
-  "req": [3, "create_app_session", [{
+  "req": [1, "create_app_session", [{
     "definition": {
       "protocol": "NitroRPC/0.2",
       "participants": [
@@ -272,10 +283,19 @@ Creates a virtual application between participants.
       "challenge": 86400,
       "nonce": 1
     },
-    "token": "0xTokenAddress",
-    "allocations": [100, 100]
+    "allocations": [
+      {
+        "participant": "0xAaBbCcDdEeFf0011223344556677889900aAbBcC",
+        "asset": "usdc",
+        "amount": "100.0"
+      },
+      {
+        "participant": "0x00112233445566778899AaBbCcDdEeFf00112233",
+        "asset": "usdc", 
+        "amount": "100.0"
+      }
+    ]
   }], 1619123456789],
-  "int": [100, 100], // Initial funding intent from 0, 0
   "sig": ["0x9876fedcba..."]
 }
 ```
@@ -284,8 +304,8 @@ Creates a virtual application between participants.
 
 ```json
 {
-  "res": [3, "create_app_session", [{
-    "app_id": "0x3456789012abcdef...",
+  "res": [1, "create_app_session", [{
+    "app_session_id": "0x3456789012abcdef...",
     "status": "open"
   }], 1619123456789],
   "sig": ["0xabcd1234..."]
@@ -300,11 +320,21 @@ Closes a virtual application and redistributes funds.
 
 ```json
 {
-  "req": [4, "close_app_session", [{
-    "app_id": "0x3456789012abcdef...",
-    "allocations": [0, 200]
+  "req": [1, "close_app_session", [{
+    "app_session_id": "0x3456789012abcdef...",
+    "allocations": [
+      {
+        "participant": "0xAaBbCcDdEeFf0011223344556677889900aAbBcC",
+        "asset": "usdc",
+        "amount": "0.0"
+      },
+      {
+        "participant": "0x00112233445566778899AaBbCcDdEeFf00112233",
+        "asset": "usdc",
+        "amount": "200.0"
+      }
+    ]
   }], 1619123456789],
-  "int": [0, 200],
   "sig": ["0x9876fedcba...", "0x8765fedcba..."]
 }
 ```
@@ -313,8 +343,8 @@ Closes a virtual application and redistributes funds.
 
 ```json
 {
-  "res": [4, "close_app_session", [{
-    "app_id": "0x3456789012abcdef...",
+  "res": [1, "close_app_session", [{
+    "app_session_id": "0x3456789012abcdef...",
     "status": "closed"
   }], 1619123456789],
   "sig": ["0xabcd1234..."]
@@ -329,7 +359,7 @@ Closes a channel between a participant and the broker.
 
 ```json
 {
-  "req": [5, "close_channel", [{
+  "req": [1, "close_channel", [{
     "channel_id": "0x4567890123abcdef...",
     "funds_destination": "0x1234567890abcdef..."
   }], 1619123456789],
@@ -341,10 +371,10 @@ Closes a channel between a participant and the broker.
 
 ```json
 {
-  "res": [5, "close_channel", [{
+  "res": [1, "close_channel", [{
     "channel_id": "0x4567890123abcdef...",
     "intent": 1,
-    "version": "123",
+    "version": 123,
     "state_data": "0x0000000000000000000000000000000000000000000000000000000000001ec7",
     "allocations": [
       {
@@ -377,24 +407,34 @@ Adjusts the capacity of a channel.
 
 ```json
 {
-  "req": [6, "resize_channel", [{
+  "req": [1, "resize_channel", [{
     "channel_id": "0x4567890123abcdef...",
-    "participant_change": "50000",
+    "allocate_amount": "20.0",
+    "resize_amount": "100.0",
     "funds_destination": "0x1234567890abcdef..."
   }], 1619123456789],
   "sig": ["0x9876fedcba..."]
 }
 ```
 
+`allocate_amount` is how much more token user wants to allocate to this token-network specific channel from his unified balance.
+`resize_amount` is how much user wants to deposit or withdraw from a token-network speecific channel.
+
+Example: 
+- Initial state: user an open channel on Polygon with 20 usdc, and a channel on Celo with 5 usdc.
+- User wants to deposit 75 usdc on Celo. User calls `resize_channel`, with `allocate_amount=0` and `resize_amount=75`.
+- Now user's unified balance is 100 usdc (20 on Polygon and 80 on Celo).
+- Now user wants wo withdraw all 100 usdc on Polygon. To withdraw, user must allocate 80 on this specific channel (`allocate_amount=80`), and resize it (`resize_amount=-100`). Also it is recommended to deallocate the channel on Celo (optional, but we may make this required in the future).
+
 **Response:**
 
 ```json
 {
-  "res": [6, "resize_channel", [{
+  "res": [1, "resize_channel", [{
     "channel_id": "0x4567890123abcdef...",
-    "intent": 2,
-    "version": "124",
     "state_data": "0x0000000000000000000000000000000000000000000000000000000000002ec7",
+    "intent": 2,
+    "version": 5,
     "allocations": [
       {
         "destination": "0x1234567890abcdef...",
@@ -418,34 +458,36 @@ Adjusts the capacity of a channel.
 }
 ```
 
+The channel will be resized on the blockchain network where it was originally opened, as identified by the `chain_id` associated with the channel. The `new_amount` parameter specifies the desired capacity for the channel.
+
 ## Messaging
 
 ### Send Message in Virtual Application
 
-Sends a message to all participants in a virtual application.
+Sends a message to all participants in a virtual app session.
 
 **Request:**
 
 ```json
 {
-  "req": [6, "message", [{
-    "message": "Hello, application participants!"
+  "req": [1, "your_custom_method", [{
+    "your_custom_field": "Hello, application participants!"
   }], 1619123456789],
-  "acc": "0x3456789012abcdef...", // Virtual application ID
+  "sid": "0x3456789012abcdef...", // Virtual App Session ID
   "sig": ["0x9876fedcba..."]
 }
 ```
 
 ### Send Response in Virtual Application
 
-Responses can also be forwarded to all participants in a virtual application by including the AppID field:
+Responses can also be forwarded to all participants in a virtual application by including the AppSessionID `sid`:
 
 ```json
 {
-  "res": [6, "message", [{
-    "message": "I confirm that I have received your message!"
+  "res": [1, "your_custom_method", [{
+    "your_custom_field": "I confirm that I have received your message!"
   }], 1619123456789],
-  "acc": "0x3456789012abcdef...", // Virtual application ID
+  "sid": "0x3456789012abcdef...", // Virtual App Session ID
   "sig": ["0x9876fedcba..."]
 }
 ```
@@ -460,7 +502,7 @@ Simple ping to check connectivity.
 
 ```json
 {
-  "req": [7, "ping", [], 1619123456789],
+  "req": [1, "ping", [], 1619123456789],
   "sig": ["0x9876fedcba..."]
 }
 ```
@@ -469,20 +511,79 @@ Simple ping to check connectivity.
 
 ```json
 {
-  "res": [7, "pong", [], 1619123456789],
+  "res": [1, "pong", [], 1619123456789],
   "sig": ["0xabcd1234..."]
 }
 ```
 
+### Balance Updates
+
+The server automatically sends balance updates to clients in these scenarios:
+1. After successful authentication (as a welcome message)
+2. After channel operations (open, close, resize)
+3. After application operations (create, close)
+
+Balance updates are sent as unsolicited server messages with the "bu" method:
+
+```json
+{
+  "res": [1234567890123, "bu", [[
+    {
+      "asset": "usdc",
+      "amount": "100.0"
+    },
+    {
+      "asset": "eth",
+      "amount": "0.5"
+    }
+  ]], 1619123456789],
+  "sig": ["0xabcd1234..."]
+}
+```
+
+The balance update provides the latest balances for all assets in the participant's unified ledger, allowing clients to maintain an up-to-date view of available funds without explicitly requesting them.
+
+### Channel Updates
+
+The server automatically sends channel updates to clients in these scenarios:
+1. After successful authentication (for all existing channels)
+2. When a channel is created
+3. When a channel's status changes (open, joined, closed)
+4. When a channel is resized
+
+Channel updates are sent as unsolicited server messages with the "cu" method:
+
+```json
+{
+  "res": [1234567890123, "cu", [{
+    "channel_id": "0xfedcba9876543210...",
+    "participant": "0x1234567890abcdef...",
+    "status": "open",
+    "token": "0xeeee567890abcdef...",
+    "amount": "100000",
+    "chain_id": 137,
+    "adjudicator": "0xAdjudicatorContractAddress...",
+    "challenge": 86400,
+    "nonce": 1,
+    "version": 2,
+    "created_at": "2023-05-01T12:00:00Z",
+    "updated_at": "2023-05-01T12:30:00Z"
+  }], 1619123456789],
+  "sig": ["0xabcd1234..."]
+}
+```
+
+The channel update contains the complete current state of a specific channel, allowing clients to maintain an up-to-date view of their channels without explicitly requesting them through the `get_channels` method.
+
 ### Get Configuration
 
-Retrieves broker configuration information.
+Retrieves broker configuration information including supported networks.
 
 **Request:**
 
 ```json
 {
-  "req": [8, "get_config", [], 1619123456789],
+  "req": [1, "get_config", [], 1619123456789],
   "sig": ["0x9876fedcba..."]
 }
 ```
@@ -491,8 +592,25 @@ Retrieves broker configuration information.
 
 ```json
 {
-  "res": [8, "get_config", [{
-    "brokerAddress": "0xbbbb567890abcdef..."
+  "res": [1, "get_config", [{
+    "broker_address": "0xbbbb567890abcdef...",
+    "networks": [
+      {
+        "name": "polygon",
+        "chain_id": 137,
+        "custody_address": "0xCustodyContractAddress1..."
+      },
+      {
+        "name": "celo",
+        "chain_id": 42220,
+        "custody_address": "0xCustodyContractAddress2..."
+      },
+      {
+        "name": "base",
+        "chain_id": 8453,
+        "custody_address": "0xCustodyContractAddress3..."
+      }
+    ]
   }], 1619123456789],
   "sig": ["0xabcd1234..."]
 }

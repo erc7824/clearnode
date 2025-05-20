@@ -5,13 +5,16 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"math/big"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/google/uuid"
+	"github.com/shopspring/decimal"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/testcontainers/testcontainers-go"
@@ -33,7 +36,7 @@ func setupTestSqlite(t testing.TB) *gorm.DB {
 	require.NoError(t, err)
 
 	// Auto migrate all required models
-	err = db.AutoMigrate(&Entry{}, &Channel{}, &VApp{}, &RPCRecord{})
+	err = db.AutoMigrate(&Entry{}, &Channel{}, &AppSession{}, &RPCRecord{}, &Asset{})
 	require.NoError(t, err)
 
 	return db
@@ -74,7 +77,7 @@ func setupTestPostgres(ctx context.Context, t testing.TB) (*gorm.DB, testcontain
 	require.NoError(t, err)
 
 	// Auto migrate all required models
-	err = db.AutoMigrate(&Entry{}, &Channel{}, &VApp{}, &RPCRecord{})
+	err = db.AutoMigrate(&Entry{}, &Channel{}, &AppSession{}, &RPCRecord{}, &Asset{})
 	require.NoError(t, err)
 
 	return db, postgresContainer
@@ -114,8 +117,8 @@ func setupTestDB(t testing.TB) (*gorm.DB, func()) {
 // TestHandlePing tests the ping handler functionality
 func TestHandlePing(t *testing.T) {
 	// Test case 1: Simple ping with no parameters
-	rpcRequest1 := &RPCRequest{
-		Req: RPCData{
+	rpcRequest1 := &RPCMessage{
+		Req: &RPCData{
 			RequestID: 1,
 			Method:    "ping",
 			Params:    []any{nil},
@@ -134,87 +137,59 @@ func TestHandlePing(t *testing.T) {
 // TestHandleCloseVirtualApp tests the close virtual app handler functionality
 func TestHandleCloseVirtualApp(t *testing.T) {
 	raw, err := crypto.GenerateKey()
-	if err != nil {
-		t.Fatalf("could not generate secp256k1 key: %v", err)
-	}
+	require.NoError(t, err)
 
-	signer := Signer{
-		privateKey: raw,
-	}
-	addr := signer.GetAddress()
-	participantA := addr.Hex()
+	signer := Signer{privateKey: raw}
+	participantA := signer.GetAddress().Hex()
+	participantB := "0xParticipantB"
 
-	// Set up test database with cleanup
 	db, cleanup := setupTestDB(t)
 	defer cleanup()
 
-	// Create ledger
-	ledger := NewLedger(db)
-
-	// Create token address
 	tokenAddress := "0xToken123"
-
-	// Set up participants
-	participantB := "0xParticipantB"
-
-	// Create channels for both participants
-	channelA := &Channel{
-		ChannelID:    "0xChannelA",
-		ParticipantA: participantA,
-		ParticipantB: BrokerAddress,
-		Status:       ChannelStatusOpen,
-		Token:        tokenAddress,
-		Nonce:        1,
-		CreatedAt:    time.Now(),
-		UpdatedAt:    time.Now(),
-	}
-	require.NoError(t, db.Create(channelA).Error)
-
-	channelB := &Channel{
-		ChannelID:    "0xChannelB",
-		ParticipantA: participantB,
-		ParticipantB: BrokerAddress,
-		Status:       ChannelStatusOpen,
-		Token:        tokenAddress,
-		Nonce:        1,
-		CreatedAt:    time.Now(),
-		UpdatedAt:    time.Now(),
-	}
-	require.NoError(t, db.Create(channelB).Error)
+	require.NoError(t, db.Create(&Channel{
+		ChannelID:   "0xChannelA",
+		Participant: participantA,
+		Status:      ChannelStatusOpen,
+		Token:       tokenAddress,
+		Nonce:       1,
+	}).Error)
+	require.NoError(t, db.Create(&Channel{
+		ChannelID:   "0xChannelB",
+		Participant: participantB,
+		Status:      ChannelStatusOpen,
+		Token:       tokenAddress,
+		Nonce:       1,
+	}).Error)
 
 	// Create a virtual app
 	vAppID := "0xVApp123"
-	vApp := &VApp{
-		AppID:        vAppID,
+	require.NoError(t, db.Create(&AppSession{
+		SessionID:    vAppID,
 		Participants: []string{participantA, participantB},
 		Status:       ChannelStatusOpen,
 		Challenge:    60,
 		Weights:      []int64{100, 0},
-		Token:        tokenAddress,
-		CreatedAt:    time.Now(),
-		UpdatedAt:    time.Now(),
 		Quorum:       100,
-	}
-	require.NoError(t, db.Create(vApp).Error)
+	}).Error)
 
-	// Add funds to the virtual app
-	accountA := ledger.SelectBeneficiaryAccount(vAppID, participantA)
-	require.NoError(t, accountA.Record(200))
+	assetSymbol := "usdc"
 
-	accountB := ledger.SelectBeneficiaryAccount(vAppID, participantB)
-	require.NoError(t, accountB.Record(300))
+	require.NoError(t, GetParticipantLedger(db, participantA).Record(vAppID, assetSymbol, decimal.NewFromInt(200)))
+	require.NoError(t, GetParticipantLedger(db, participantB).Record(vAppID, assetSymbol, decimal.NewFromInt(300)))
 
-	closeParams := CloseApplicationParams{
-		AppID:            vAppID,
-		FinalAllocations: []int64{250, 250},
+	closeParams := CloseAppSessionParams{
+		AppSessionID: vAppID,
+		Allocations: []AppAllocation{
+			{Participant: participantA, AssetSymbol: assetSymbol, Amount: decimal.NewFromInt(250)},
+			{Participant: participantB, AssetSymbol: assetSymbol, Amount: decimal.NewFromInt(250)},
+		},
 	}
 
 	// Create RPC request
-	paramsJSON, err := json.Marshal(closeParams)
-	require.NoError(t, err)
-
-	req := &RPCRequest{
-		Req: RPCData{
+	paramsJSON, _ := json.Marshal(closeParams)
+	req := &RPCMessage{
+		Req: &RPCData{
 			RequestID: 1,
 			Method:    "close_app_session",
 			Params:    []any{json.RawMessage(paramsJSON)},
@@ -222,204 +197,129 @@ func TestHandleCloseVirtualApp(t *testing.T) {
 		},
 	}
 
-	// Create signing data
-	closeSignData := CloseAppSignData{
+	signData := CloseAppSignData{
 		RequestID: req.Req.RequestID,
 		Method:    req.Req.Method,
-		Params:    []CloseApplicationParams{closeParams},
+		Params:    []CloseAppSessionParams{closeParams},
 		Timestamp: req.Req.Timestamp,
 	}
-	signBytes, err := json.Marshal(closeSignData)
-	require.NoError(t, err)
+	signBytes, _ := json.Marshal(signData)
+	sig, _ := signer.Sign(signBytes)
+	req.Sig = []string{hexutil.Encode(sig)}
 
-	signed, err := signer.Sign(signBytes)
+	resp, err := HandleCloseApplication(req, db)
 	require.NoError(t, err)
-	req.Sig = []string{hexutil.Encode(signed)}
-
-	resp, err := HandleCloseApplication(req, ledger)
-	require.NoError(t, err)
-
-	// Verify response
 	assert.Equal(t, "close_app_session", resp.Res.Method)
-	assert.Equal(t, uint64(1), resp.Res.RequestID)
-
-	// Check that channel is marked as closed
-	var updatedChannel VApp
-	require.NoError(t, db.Where("app_id = ?", vAppID).First(&updatedChannel).Error)
-	assert.Equal(t, ChannelStatusClosed, updatedChannel.Status)
+	var updated AppSession
+	require.NoError(t, db.Where("session_id = ?", vAppID).First(&updated).Error)
+	assert.Equal(t, ChannelStatusClosed, updated.Status)
 
 	// Check that funds were transferred back to channels according to allocations
-	directAccountA := ledger.SelectBeneficiaryAccount(channelA.ChannelID, participantA)
-	balanceA, err := directAccountA.Balance()
-	require.NoError(t, err)
-	assert.Equal(t, int64(250), balanceA)
+	balA, _ := GetParticipantLedger(db, participantA).Balance(participantA, "usdc")
+	balB, _ := GetParticipantLedger(db, participantB).Balance(participantB, "usdc")
+	assert.Equal(t, decimal.NewFromInt(250), balA)
+	assert.Equal(t, decimal.NewFromInt(250), balB)
 
-	directAccountB := ledger.SelectBeneficiaryAccount(channelB.ChannelID, participantB)
-	balanceB, err := directAccountB.Balance()
-	require.NoError(t, err)
-	assert.Equal(t, int64(250), balanceB)
+	// ► v-app accounts drained
+	vBalA, _ := GetParticipantLedger(db, participantA).Balance(vAppID, "usdc")
+	vBalB, _ := GetParticipantLedger(db, participantB).Balance(vAppID, "usdc")
 
-	// Check that virtual app accounts are empty
-	virtualAccountA := ledger.SelectBeneficiaryAccount(vAppID, participantA)
-	virtualBalanceA, err := virtualAccountA.Balance()
-	require.NoError(t, err)
-	assert.Equal(t, int64(0), virtualBalanceA)
-
-	virtualAccountB := ledger.SelectBeneficiaryAccount(vAppID, participantB)
-	virtualBalanceB, err := virtualAccountB.Balance()
-	require.NoError(t, err)
-	assert.Equal(t, int64(0), virtualBalanceB)
+	assert.True(t, vBalA.IsZero(), "Participant A vApp balance should be zero")
+	assert.True(t, vBalB.IsZero(), "Participant B vApp balance should be zero")
 }
 
-// TestHandleCreateVirtualApp tests the create virtual app handler functionality
 func TestHandleCreateVirtualApp(t *testing.T) {
 	// Generate private keys for both participants
-	rawKeyA, err := crypto.GenerateKey()
-	require.NoError(t, err)
-	signerA := Signer{privateKey: rawKeyA}
+	rawA, _ := crypto.GenerateKey()
+	rawB, _ := crypto.GenerateKey()
+	signerA := Signer{privateKey: rawA}
+	signerB := Signer{privateKey: rawB}
 	addrA := signerA.GetAddress().Hex()
-
-	rawKeyB, err := crypto.GenerateKey()
-	require.NoError(t, err)
-	signerB := Signer{privateKey: rawKeyB}
 	addrB := signerB.GetAddress().Hex()
 
-	// Set up test database with cleanup
 	db, cleanup := setupTestDB(t)
 	defer cleanup()
 
-	// Create channels for both participants
-	tokenAddress := "0xTokenXYZ"
-	channelA := &Channel{
-		ChannelID:    "0xChannelA",
-		ParticipantA: addrA,
-		ParticipantB: BrokerAddress,
-		Status:       ChannelStatusOpen,
-		Token:        tokenAddress,
-		Nonce:        1,
-		CreatedAt:    time.Now(),
-		UpdatedAt:    time.Now(),
+	// open direct channels (still required elsewhere in code-base)
+	token := "0xTokenXYZ"
+	for i, p := range []string{addrA, addrB} {
+		ch := &Channel{
+			ChannelID:   fmt.Sprintf("0xChannel%c", 'A'+i),
+			Participant: p,
+			Status:      ChannelStatusOpen,
+			Token:       token,
+			Nonce:       1,
+		}
+		require.NoError(t, db.Create(ch).Error)
 	}
-	require.NoError(t, db.Create(channelA).Error)
 
-	channelB := &Channel{
-		ChannelID:    "0xChannelB",
-		ParticipantA: addrB,
-		ParticipantB: BrokerAddress,
-		Status:       ChannelStatusOpen,
-		Token:        tokenAddress,
-		Nonce:        1,
-		CreatedAt:    time.Now(),
-		UpdatedAt:    time.Now(),
-	}
-	require.NoError(t, db.Create(channelB).Error)
+	require.NoError(t, GetParticipantLedger(db, addrA).Record(addrA, "usdc", decimal.NewFromInt(100)))
+	require.NoError(t, GetParticipantLedger(db, addrB).Record(addrB, "usdc", decimal.NewFromInt(200)))
 
-	// Create ledger and fund channels
-	ledger := NewLedger(db)
-	acctA := ledger.SelectBeneficiaryAccount(channelA.ChannelID, addrA)
-	require.NoError(t, acctA.Record(100))
-	acctB := ledger.SelectBeneficiaryAccount(channelB.ChannelID, addrB)
-	require.NoError(t, acctB.Record(200))
-
-	// Create common timestamp for all signatures - will also be used as nonce
-	timestamp := uint64(time.Now().Unix())
-
-	// First set up the combined parameters in the same format as the handler uses
-	appDefinition := AppDefinition{
+	ts := uint64(time.Now().Unix())
+	def := AppDefinition{
 		Protocol:     "test-proto",
 		Participants: []string{addrA, addrB},
 		Weights:      []uint64{1, 1},
 		Quorum:       2,
 		Challenge:    60,
-		Nonce:        timestamp, // Set nonce to match what the handler sets
+		Nonce:        ts, // if omitted, handler would use ts anyway
+	}
+	asset := "usdc"
+	createParams := CreateAppSessionParams{
+		Definition: def,
+		Allocations: []AppAllocation{
+			{Participant: addrA, AssetSymbol: asset, Amount: decimal.NewFromInt(100)},
+			{Participant: addrB, AssetSymbol: asset, Amount: decimal.NewFromInt(200)},
+		},
 	}
 
-	// Create the RPC request with the combined application parameters
-	createParams := CreateApplicationParams{
-		Definition:  appDefinition,
-		Token:       tokenAddress,
-		Allocations: []int64{100, 200}, // Combined allocations
-	}
-
-	rpcReq := &RPCRequest{
-		Req: RPCData{
+	rpcReq := &RPCMessage{
+		Req: &RPCData{
 			RequestID: 42,
 			Method:    "create_app_session",
 			Params:    []any{createParams},
-			Timestamp: timestamp,
+			Timestamp: ts,
 		},
-		Intent: []int64{100, 200},
 	}
 
-	// Create the CreateAppSignData object exactly as it's created in HandleCreateApplication
-	// This is the critical part to match!
-	req := CreateAppSignData{
+	// sign exactly like the handler
+	signData := CreateAppSignData{
 		RequestID: rpcReq.Req.RequestID,
 		Method:    rpcReq.Req.Method,
-		Params:    []CreateApplicationParams{createParams},
+		Params:    []CreateAppSessionParams{createParams},
 		Timestamp: rpcReq.Req.Timestamp,
 	}
+	signBytes, _ := signData.MarshalJSON()
+	sigA, _ := signerA.Sign(signBytes)
+	sigB, _ := signerB.Sign(signBytes)
+	rpcReq.Sig = []string{hexutil.Encode(sigA), hexutil.Encode(sigB)}
 
-	// Important: Use the custom MarshalJSON method instead of standard json.Marshal
-	// This ensures the exact same data format as in the handler
-	reqBytes, err := req.MarshalJSON()
+	resp, err := HandleCreateApplication(rpcReq, db)
 	require.NoError(t, err)
 
-	// Sign with participant A's key
-	signA, err := signerA.Sign(reqBytes)
-	require.NoError(t, err)
-	sigA := hexutil.Encode(signA)
-
-	// Sign with participant B's key
-	signB, err := signerB.Sign(reqBytes)
-	require.NoError(t, err)
-	sigB := hexutil.Encode(signB)
-
-	// Add both signatures to the request
-	rpcReq.Sig = []string{sigA, sigB}
-
-	// Process the request
-	resp, err := HandleCreateApplication(rpcReq, ledger)
-	require.NoError(t, err)
-	require.NotNil(t, resp)
-
-	// Validate RPC response
-	assert.Equal(t, rpcReq.Req.Method, resp.Res.Method)
-	assert.Equal(t, uint64(42), resp.Res.RequestID)
-
-	// Extract the AppResponse
-	params := resp.Res.Params
-	require.Len(t, params, 1)
-	require.IsType(t, &AppResponse{}, params[0])
-	appResp := params[0].(*AppResponse)
-
+	// ► response sanity
+	assert.Equal(t, "create_app_session", resp.Res.Method)
+	appResp, ok := resp.Res.Params[0].(*AppSessionResponse)
+	require.True(t, ok)
 	assert.Equal(t, string(ChannelStatusOpen), appResp.Status)
 
-	// Verify the VApp record exists
-	var vApp VApp
-	require.NoError(t, db.
-		Where("app_id = ?", appResp.AppID).
-		First(&vApp).Error)
-	assert.Equal(t, tokenAddress, vApp.Token)
+	// ► v-app row exists
+	var vApp AppSession
+	require.NoError(t, db.Where("session_id = ?", appResp.AppSessionID).First(&vApp).Error)
 	assert.ElementsMatch(t, []string{addrA, addrB}, vApp.Participants)
-	assert.Equal(t, ChannelStatusOpen, vApp.Status)
 
-	// Check balances: channels drained, virtual app funded
-	directBalA, err := ledger.SelectBeneficiaryAccount(channelA.ChannelID, addrA).Balance()
-	require.NoError(t, err)
-	assert.Equal(t, int64(0), directBalA, "channel A should be drained")
+	// ► participant accounts drained
+	partBalA, _ := GetParticipantLedger(db, addrA).Balance(addrA, "usdc")
+	partBalB, _ := GetParticipantLedger(db, addrB).Balance(addrB, "usdc")
+	assert.True(t, partBalA.IsZero(), "Participant A balance should be zero")
+	assert.True(t, partBalB.IsZero(), "Participant B balance should be zero")
 
-	directBalB, err := ledger.SelectBeneficiaryAccount(channelB.ChannelID, addrB).Balance()
-	require.NoError(t, err)
-	assert.Equal(t, int64(0), directBalB, "channel B should be drained")
-
-	virtBalA, err := ledger.SelectBeneficiaryAccount(appResp.AppID, addrA).Balance()
-	require.NoError(t, err)
-	assert.Equal(t, int64(100), virtBalA, "virtual app A balance")
-
-	virtBalB, err := ledger.SelectBeneficiaryAccount(appResp.AppID, addrB).Balance()
-	require.NoError(t, err)
-	assert.Equal(t, int64(200), virtBalB, "virtual app B balance")
+	// ► virtual-app funded - each participant can see the total app session balance (300)
+	vBalA, _ := GetParticipantLedger(db, addrA).Balance(appResp.AppSessionID, "usdc")
+	vBalB, _ := GetParticipantLedger(db, addrB).Balance(appResp.AppSessionID, "usdc")
+	assert.Equal(t, decimal.NewFromInt(100).String(), vBalA.String())
+	assert.Equal(t, decimal.NewFromInt(200).String(), vBalB.String())
 }
 
 // TestHandleListParticipants tests the list available channels handler functionality
@@ -428,50 +328,19 @@ func TestHandleListParticipants(t *testing.T) {
 	db, cleanup := setupTestDB(t)
 	defer cleanup()
 
-	// Create channel service and ledger
-	ledger := NewLedger(db)
-
-	// Create test channels with the broker
-	participants := []struct {
-		address        string
-		channelID      string
-		initialBalance int64
-		status         ChannelStatus
-	}{
-		{"0xParticipant1", "0xChannel1", 1000, ChannelStatusOpen},
-	}
-
-	// Insert channels and ledger entries for testing
-	for _, p := range participants {
-		// Create channel
-		channel := Channel{
-			ChannelID:    p.channelID,
-			ParticipantA: p.address,
-			ParticipantB: BrokerAddress,
-			Status:       p.status,
-			CreatedAt:    time.Now(),
-			UpdatedAt:    time.Now(),
-		}
-		err := db.Create(&channel).Error
-		require.NoError(t, err)
-
-		// Add funds if needed
-		if p.initialBalance > 0 {
-			account := ledger.SelectBeneficiaryAccount(p.channelID, p.address)
-			err = account.Record(p.initialBalance)
-			require.NoError(t, err)
-		}
-	}
+	ledger := GetParticipantLedger(db, "0xParticipant1")
+	err := ledger.Record("0xParticipant1", "usdc", decimal.NewFromInt(1000))
+	require.NoError(t, err)
 
 	// Create RPC request with token address parameter
 	params := map[string]string{
-		"acc": "0xChannel1",
+		"participant": "0xParticipant1",
 	}
 	paramsJSON, err := json.Marshal(params)
 	require.NoError(t, err)
 
-	rpcRequest := &RPCRequest{
-		Req: RPCData{
+	rpcRequest := &RPCMessage{
+		Req: &RPCData{
 			RequestID: 1,
 			Method:    "get_ledger_balances",
 			Params:    []any{json.RawMessage(paramsJSON)},
@@ -481,43 +350,67 @@ func TestHandleListParticipants(t *testing.T) {
 	}
 
 	// Use the test-specific handler instead of the actual one
-	response, err := HandleGetLedgerBalances(rpcRequest, ledger)
+	msg, err := HandleGetLedgerBalances(rpcRequest, "0xParticipant1", db)
 	require.NoError(t, err)
-	assert.NotNil(t, response)
+	assert.NotNil(t, msg)
 
 	// Extract the response data
 	var responseParams []any
-	responseParams = response.Res.Params
+	responseParams = msg.Res.Params
 	require.NotEmpty(t, responseParams)
 
 	// First parameter should be an array of ChannelAvailabilityResponse
-	channelsArray, ok := responseParams[0].([]AvailableBalance)
+	channelsArray, ok := responseParams[0].([]Balance)
 	require.True(t, ok, "Response should contain an array of ChannelAvailabilityResponse")
 
 	// We should have 4 channels with positive balances (excluding closed one)
 	assert.Equal(t, 1, len(channelsArray), "Should have 4 channels")
 
 	// Check the contents of each channel response
-	expectedAddresses := map[string]int64{
-		"0xParticipant1": 1000,
+	expectedAssets := map[string]decimal.Decimal{
+		"usdc": decimal.NewFromInt(1000),
 	}
 
 	for _, ch := range channelsArray {
-		expectedBalance, exists := expectedAddresses[ch.Address]
-		assert.True(t, exists, "Unexpected address in response: %s", ch.Address)
-		assert.Equal(t, expectedBalance, ch.Amount, "Incorrect balance for address %s", ch.Address)
+		expectedBalance, exists := expectedAssets[ch.Asset]
+		assert.True(t, exists, "Unexpected address in response: %s", ch.Asset)
+		assert.Equal(t, expectedBalance, ch.Amount, "Incorrect balance for address %s", ch.Asset)
 
 		// Remove from map to ensure each address appears only once
-		delete(expectedAddresses, ch.Address)
+		delete(expectedAssets, ch.Asset)
 	}
 
-	assert.Empty(t, expectedAddresses, "Not all expected addresses were found in the response")
+	assert.Empty(t, expectedAssets, "Not all expected addresses were found in the response")
 }
 
 // TestHandleGetConfig tests the get config handler functionality
 func TestHandleGetConfig(t *testing.T) {
-	rpcRequest := &RPCRequest{
-		Req: RPCData{
+	// Create a mock config with supported networks
+	mockConfig := &Config{
+		networks: map[string]*NetworkConfig{
+			"polygon": {
+				Name:           "polygon",
+				ChainID:        137,
+				InfuraURL:      "https://polygon-mainnet.infura.io/v3/test",
+				CustodyAddress: "0xCustodyAddress1",
+			},
+			"celo": {
+				Name:           "celo",
+				ChainID:        42220,
+				InfuraURL:      "https://celo-mainnet.infura.io/v3/test",
+				CustodyAddress: "0xCustodyAddress2",
+			},
+			"base": {
+				Name:           "base",
+				ChainID:        8453,
+				InfuraURL:      "https://base-mainnet.infura.io/v3/test",
+				CustodyAddress: "0xCustodyAddress3",
+			},
+		},
+	}
+
+	rpcRequest := &RPCMessage{
+		Req: &RPCData{
 			RequestID: 1,
 			Method:    "get_config",
 			Params:    []any{},
@@ -526,7 +419,12 @@ func TestHandleGetConfig(t *testing.T) {
 		Sig: []string{"dummy-signature"},
 	}
 
-	response, err := HandleGetConfig(rpcRequest)
+	raw, err := crypto.GenerateKey()
+	require.NoError(t, err)
+
+	signer := Signer{privateKey: raw}
+
+	response, err := HandleGetConfig(rpcRequest, mockConfig, &signer)
 	require.NoError(t, err)
 	assert.NotNil(t, response)
 
@@ -539,7 +437,28 @@ func TestHandleGetConfig(t *testing.T) {
 	configMap, ok := responseParams[0].(BrokerConfig)
 	require.True(t, ok, "Response should contain a BrokerConfig")
 
-	assert.Equal(t, BrokerAddress, configMap.BrokerAddress)
+	// Verify broker address
+	assert.Equal(t, signer.GetAddress().Hex(), configMap.BrokerAddress)
+
+	// Verify supported networks
+	require.Len(t, configMap.Networks, 3, "Should have 3 supported networks")
+
+	// Map to check all networks are present
+	expectedNetworks := map[string]uint32{
+		"polygon": 137,
+		"celo":    42220,
+		"base":    8453,
+	}
+
+	for _, network := range configMap.Networks {
+		expectedChainID, exists := expectedNetworks[network.Name]
+		assert.True(t, exists, "Network %s should be in expected networks", network.Name)
+		assert.Equal(t, expectedChainID, network.ChainID, "Chain ID should match for %s", network.Name)
+		assert.Contains(t, network.CustodyAddress, "0xCustodyAddress", "Custody address should be present")
+		delete(expectedNetworks, network.Name)
+	}
+
+	assert.Empty(t, expectedNetworks, "All expected networks should be found in the response")
 }
 
 // TestHandleGetChannels tests the get channels functionality
@@ -552,47 +471,51 @@ func TestHandleGetChannels(t *testing.T) {
 	db, cleanup := setupTestDB(t)
 	defer cleanup()
 
-	ledger := NewLedger(db)
-
 	tokenAddress := "0xToken123"
-	networkID := "137"
+	chainID := uint32(137)
 
 	channels := []Channel{
 		{
-			ChannelID:    "0xChannel1",
-			ParticipantA: participantAddr,
-			ParticipantB: BrokerAddress,
-			Status:       ChannelStatusOpen,
-			Token:        tokenAddress,
-			NetworkID:    networkID,
-			Amount:       1000,
-			Nonce:        1,
-			CreatedAt:    time.Now().Add(-24 * time.Hour), // 1 day ago
-			UpdatedAt:    time.Now(),
+			ChannelID:   "0xChannel1",
+			Participant: participantAddr,
+			Status:      ChannelStatusOpen,
+			Token:       tokenAddress + "1",
+			ChainID:     chainID,
+			Amount:      1000,
+			Nonce:       1,
+			Version:     10,
+			Challenge:   86400,
+			Adjudicator: "0xAdj1",
+			CreatedAt:   time.Now().Add(-24 * time.Hour), // 1 day ago
+			UpdatedAt:   time.Now(),
 		},
 		{
-			ChannelID:    "0xChannel2",
-			ParticipantA: participantAddr,
-			ParticipantB: BrokerAddress,
-			Status:       ChannelStatusClosed,
-			Token:        tokenAddress,
-			NetworkID:    networkID,
-			Amount:       2000,
-			Nonce:        2,
-			CreatedAt:    time.Now().Add(-12 * time.Hour), // 12 hours ago
-			UpdatedAt:    time.Now(),
+			ChannelID:   "0xChannel2",
+			Participant: participantAddr,
+			Status:      ChannelStatusClosed,
+			Token:       tokenAddress + "2",
+			ChainID:     chainID,
+			Amount:      2000,
+			Nonce:       2,
+			Version:     20,
+			Challenge:   86400,
+			Adjudicator: "0xAdj2",
+			CreatedAt:   time.Now().Add(-12 * time.Hour), // 12 hours ago
+			UpdatedAt:   time.Now(),
 		},
 		{
-			ChannelID:    "0xChannel3",
-			ParticipantA: participantAddr,
-			ParticipantB: BrokerAddress,
-			Status:       ChannelStatusJoining,
-			Token:        tokenAddress,
-			NetworkID:    networkID,
-			Amount:       3000,
-			Nonce:        3,
-			CreatedAt:    time.Now().Add(-6 * time.Hour), // 6 hours ago
-			UpdatedAt:    time.Now(),
+			ChannelID:   "0xChannel3",
+			Participant: participantAddr,
+			Status:      ChannelStatusJoining,
+			Token:       tokenAddress + "3",
+			ChainID:     chainID,
+			Amount:      3000,
+			Nonce:       3,
+			Version:     30,
+			Challenge:   86400,
+			Adjudicator: "0xAdj3",
+			CreatedAt:   time.Now().Add(-6 * time.Hour), // 6 hours ago
+			UpdatedAt:   time.Now(),
 		},
 	}
 
@@ -601,16 +524,18 @@ func TestHandleGetChannels(t *testing.T) {
 	}
 
 	otherChannel := Channel{
-		ChannelID:    "0xOtherChannel",
-		ParticipantA: "0xOtherParticipant",
-		ParticipantB: BrokerAddress,
-		Status:       ChannelStatusOpen,
-		Token:        tokenAddress,
-		NetworkID:    networkID,
-		Amount:       5000,
-		Nonce:        4,
-		CreatedAt:    time.Now(),
-		UpdatedAt:    time.Now(),
+		ChannelID:   "0xOtherChannel",
+		Participant: "0xOtherParticipant",
+		Status:      ChannelStatusOpen,
+		Token:       tokenAddress + "4",
+		ChainID:     chainID,
+		Amount:      5000,
+		Nonce:       4,
+		Version:     40,
+		Challenge:   86400,
+		Adjudicator: "0xAdj4",
+		CreatedAt:   time.Now(),
+		UpdatedAt:   time.Now(),
 	}
 	require.NoError(t, db.Create(&otherChannel).Error)
 
@@ -620,8 +545,8 @@ func TestHandleGetChannels(t *testing.T) {
 	paramsJSON, err := json.Marshal(params)
 	require.NoError(t, err)
 
-	rpcRequest := &RPCRequest{
-		Req: RPCData{
+	rpcRequest := &RPCMessage{
+		Req: &RPCData{
 			RequestID: 123,
 			Method:    "get_channels",
 			Params:    []any{json.RawMessage(paramsJSON)},
@@ -635,7 +560,7 @@ func TestHandleGetChannels(t *testing.T) {
 	require.NoError(t, err)
 	rpcRequest.Sig = []string{hexutil.Encode(signed)}
 
-	response, err := HandleGetChannels(rpcRequest, ledger)
+	response, err := HandleGetChannels(rpcRequest, db)
 	require.NoError(t, err)
 	require.NotNil(t, response)
 
@@ -657,8 +582,9 @@ func TestHandleGetChannels(t *testing.T) {
 	// Verify channel data is correct
 	for _, ch := range channelsSlice {
 		assert.Equal(t, participantAddr, ch.Participant, "ParticipantA should match")
-		assert.Equal(t, tokenAddress, ch.Token, "Token should match")
-		assert.Equal(t, networkID, ch.NetworkID, "NetworkID should match")
+		// Token now has a suffix, so we check it starts with the base token address
+		assert.True(t, strings.HasPrefix(ch.Token, tokenAddress), "Token should start with the base token address")
+		assert.Equal(t, chainID, ch.ChainID, "NetworkID should match")
 
 		// Find the corresponding original channel to compare with
 		var originalChannel Channel
@@ -670,14 +596,18 @@ func TestHandleGetChannels(t *testing.T) {
 		}
 
 		assert.Equal(t, originalChannel.Status, ch.Status, "Status should match")
-		assert.Equal(t, originalChannel.Amount, ch.Amount, "Amount should match")
+		assert.Equal(t, big.NewInt(int64(originalChannel.Amount)), ch.Amount, "Amount should match")
+		assert.Equal(t, originalChannel.Nonce, ch.Nonce, "Nonce should match")
+		assert.Equal(t, originalChannel.Version, ch.Version, "Version should match")
+		assert.Equal(t, originalChannel.Challenge, ch.Challenge, "Challenge should match")
+		assert.Equal(t, originalChannel.Adjudicator, ch.Adjudicator, "Adjudicator should match")
 		assert.NotEmpty(t, ch.CreatedAt, "CreatedAt should not be empty")
 		assert.NotEmpty(t, ch.UpdatedAt, "UpdatedAt should not be empty")
 	}
 
 	// Test with invalid signature
-	invalidReq := &RPCRequest{
-		Req: RPCData{
+	invalidReq := &RPCMessage{
+		Req: &RPCData{
 			RequestID: 456,
 			Method:    "get_channels",
 			Params:    []any{json.RawMessage(paramsJSON)},
@@ -686,13 +616,13 @@ func TestHandleGetChannels(t *testing.T) {
 		Sig: []string{"0xInvalidSignature"},
 	}
 
-	_, err = HandleGetChannels(invalidReq, ledger)
+	_, err = HandleGetChannels(invalidReq, db)
 	assert.Error(t, err, "Should return error with invalid signature")
 	assert.Contains(t, err.Error(), "invalid signature", "Error should mention invalid signature")
 
 	// Test with missing participant parameter
-	missingParamReq := &RPCRequest{
-		Req: RPCData{
+	missingParamReq := &RPCMessage{
+		Req: &RPCData{
 			RequestID: 789,
 			Method:    "get_channels",
 			Params:    []any{map[string]string{}}, // Empty map
@@ -701,7 +631,7 @@ func TestHandleGetChannels(t *testing.T) {
 		Sig: []string{hexutil.Encode(signed)},
 	}
 
-	_, err = HandleGetChannels(missingParamReq, ledger)
+	_, err = HandleGetChannels(missingParamReq, db)
 	assert.Error(t, err, "Should return error with missing participant")
 	assert.Contains(t, err.Error(), "missing participant", "Error should mention missing participant")
 }
@@ -767,8 +697,8 @@ func TestHandleGetRPCHistory(t *testing.T) {
 	}
 	require.NoError(t, db.Create(&otherRecord).Error)
 
-	rpcRequest := &RPCRequest{
-		Req: RPCData{
+	rpcRequest := &RPCMessage{
+		Req: &RPCData{
 			RequestID: 100,
 			Method:    "get_rpc_history",
 			Params:    []any{},
@@ -799,8 +729,8 @@ func TestHandleGetRPCHistory(t *testing.T) {
 	assert.Equal(t, uint64(2), rpcHistory[1].ReqID, "Second record should be the middle one")
 	assert.Equal(t, uint64(1), rpcHistory[2].ReqID, "Third record should be the oldest")
 
-	missingParamReq := &RPCRequest{
-		Req: RPCData{
+	missingParamReq := &RPCMessage{
+		Req: &RPCData{
 			RequestID: 789,
 			Method:    "get_rpc_history",
 			Params:    []any{},

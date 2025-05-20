@@ -1,7 +1,7 @@
 # Clearnode Protocol Specification
 
 ## Overview
-The Clearnode protocol is a system for managing payment channels and virtual applications between participants. It provides a secure, efficient way to conduct transactions off-chain while retaining the ability to settle on-chain when required.
+The Clearnode protocol is a system for managing payment channels and virtual applications between participants. It provides a secure, efficient way to conduct transactions off-chain while retaining the ability to settle on-chain when required, with support for multiple blockchain networks.
 
 ## Protocol Flow
 
@@ -10,7 +10,7 @@ The Clearnode protocol is a system for managing payment channels and virtual app
 - Participants create on-chain channels through custody contracts (supported on multiple chains including Polygon and Celo)
 - Channel creation events from the blockchain are received through webhooks and processed by the `EventHandler`
 - These events credit participants' balances in the internal ledger system
-- Each participant has an `Account` in the ledger tied to their address, channel ID, and token address
+- Each participant has an `Account` in the ledger tied to their address.
 
 ### 2. Virtual Application Creation
 - After being credited from on-chain channels, participants can create virtual applications with other participants
@@ -38,6 +38,7 @@ The Clearnode protocol is a system for managing payment channels and virtual app
 - The virtual application is marked as closed and message routing is discontinued
 - When participants wish to materialize their balances on-chain, they can request the broker to re-open or update on-chain channels
 - Settlement is only performed when requested by participants, allowing most transactions to remain off-chain
+- Participants can have channels on multiple blockchain networks simultaneously
 
 ## Security Features
 
@@ -57,13 +58,23 @@ The Clearnode protocol is a system for managing payment channels and virtual app
 ### Multi-Chain Support
 - The system supports multiple blockchain networks (currently Polygon and Celo)
 - Each network has its own custody contract address and connection details
-- Network IDs are tracked with channels to ensure proper chain association
+- Chain IDs are tracked with channels to ensure proper chain association
+- Asset models track tokens per chain, with appropriate decimals for each token
+- Channels are created, resized, and closed on their original blockchain network
+- Participants can manage channels across multiple chains simultaneously
+- The broker maintains separate custody contract instances for each supported network
+- Event listeners monitor each blockchain network independently
+- The `get_channels` method returns all channels for a participant across all supported chains
 
 ## Benefits
 - Efficient, low-cost transactions by keeping most operations off-chain
 - Security guarantees of blockchain when needed
 - Participants can freely transact within their allocated funds in virtual applications
 - On-chain settlement only occurs when participants choose to materialize their balances
+- Cross-chain compatibility allows users to select their preferred blockchain network
+- Multi-chain support provides resilience against network-specific issues
+- Diverse token support across various blockchain ecosystems
+- Flexibility to leverage the unique benefits of each supported blockchain
 
 ## RPC Message Format
 
@@ -74,38 +85,41 @@ All messages exchanged between clients and clearnodes follow this standardized f
 ```json
 {
   "req": [REQUEST_ID, METHOD, [PARAMETERS], TIMESTAMP],
-  "acc": "ACCOUNT_ID", // AppId for Virtual Ledgers for Internal Communication
-  "int": [INTENT], // Optional allocation intent change
+  "sid": "APP_SESSION_ID", // AppId for Virtual Ledgers for Internal Communication
   "sig": ["SIGNATURE"]  // Client's signature of the entire "req" object
 }
 ```
 
-- The `acc` field serves as both the subject and destination pubsub topic for the message. There is a one-to-one mapping between topics and ledger accounts.
-- The `int` field can be omitted if there is no allocation change in this request.
-- The `sig` field contains the rpcHash signature, ensuring proof-of-history integrity.
+- The `sid` field serves as both the subject and destination pubsub topic for the message. There is a one-to-one mapping between topics and ledger accounts.
+- The `sig` field contains one or more signatures, of the `req` data.
 
 ### Response Message
 
 ```json
 {
   "res": [REQUEST_ID, METHOD, [RESPONSE_DATA], TIMESTAMP],
-  "acc": "ACCOUNT_ID", // AppId for Virtual Ledgers for Internal Communication
+  "sid": "APP_SESSION_ID", // AppId for Virtual Ledgers for Internal Communication
   "int": [INTENT],// Allocation intent change
   "sig": ["SIGNATURE"]
 }
 ```
 
+- The `sid` field serves as both the subject and destination pubsub topic for the message. There is a one-to-one mapping between topics and ledger accounts.
+- The `sig` field contains one or more signatures, of the `res` data.
+
+
 The structure breakdown:
 
-- `REQUEST_ID`: A unique identifier for the request (uint64)
-- `METHOD`: The name of the method being called (string)
-- `PARAMETERS`/`RESPONSE_DATA`: An array of parameters/response data (array)
-- `TIMESTAMP`: Unix timestamp of the request/response (uint64)
-- `ACCOUNT_ID` (`acc`): Ledger account identifier that serves as the destination pubsub topic for the message
-- `INTENT` (`int`): Optional allocation intent change for token distributions between participants
-- `SIGNATURE`: Cryptographic signature of the message.
+- `REQUEST_ID`: A unique identifier for the request/response pair (`uint64`)
+- `METHOD`: The name of the method being called (`string`)
+- `PARAMETERS`/`RESPONSE_DATA`: An array of parameters/response data (`[]any`)
+- `TIMESTAMP`: Unix timestamp of the request/response in milliseconds (`uint64`)
+- `APP_SESSION_ID` (`sid`): If specified, the message gets forwarded to all participants of a virtual app with thosn AppSessionID.
+- `SIGNATURE`: Cryptographic signatures of the message (`[]string`). Multiple signatures may be required for certain operations.
 
-## App Definition
+## Data Types
+
+### App Definition
 
 ```json
 {
@@ -121,20 +135,6 @@ The structure breakdown:
 }
 ```
 
-### Intent Format
-
-Intent specifies token distributions for a ledger allocation change.
-Values are arranged in the same order as the participants array.
-
-#### Example
-
-```json
-[-10, +10]
-```
-
-When creating a new app, the first Intent represents the initial allocation.
-The token type is defined by the funding account source (which is a ledger channel).
-Each channel supports only one currency type.
 
 ## Authentication Flow
 
@@ -162,13 +162,34 @@ The server verifies that:
 
 If authentication is successful, the server responds with a success confirmation.
 
+## Broker Configuration
+
+The broker provides configuration information through the `get_config` method, including:
+
+- Broker's Ethereum address
+- Supported blockchain networks with:
+  - Network name
+  - Chain ID
+  - Custody contract address
+
+This allows clients to understand which networks are supported and how to interact with them.
+
 ## Peer-to-Peer Messaging
 
 The broker supports bi-directional peer-to-peer messaging between participants in a virtual application. Both requests and responses can be forwarded between participants when they include AppID.
 
 ## Error Handling
 
-When an error occurs, the server responds with an error message.
+When an error occurs, the server responds with an error message:
+
+```json
+{
+  "res": [REQUEST_ID, "error", [{
+    "error": "Error message describing what went wrong"
+  }], TIMESTAMP],
+  "sig": ["SIGNATURE"]
+}
+```
 
 ## Security Considerations
 
@@ -180,6 +201,7 @@ When an error occurs, the server responds with an error message.
 6. **Address Binding**: Each challenge is stored with the address that requested it
 7. **Random Challenge Strings**: Secure, random strings are used as challenge tokens
 8. **Quorum Signatures**: Application closure requires signatures meeting or exceeding the quorum threshold
+9. **Chain Association**: Each channel is firmly associated with its originating blockchain network
 
 ## Client Implementation Guidelines
 
@@ -200,7 +222,12 @@ When an error occurs, the server responds with an error message.
    - Handle rate limiting errors by implementing backoff strategies
    - Implement timeouts for all requests
 
-4. **Security Best Practices**:
+4. **Multi-Chain Awareness**:
+   - Check the broker's supported networks using `get_config`
+   - Track channel `chain_id` values to ensure operations target the correct network
+   - Be aware that channel operations (close, resize) must be performed on the blockchain where the channel was created
+
+5. **Security Best Practices**:
    - Never reuse signatures across different sessions or services
    - Verify all message signatures from the server before processing
    - Ensure your private key is securely stored and never exposed
