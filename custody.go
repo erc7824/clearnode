@@ -194,7 +194,6 @@ func (c *Custody) handleBlockChainEvent(l types.Log) {
 		var channel Channel
 		channelID := common.BytesToHash(ev.ChannelId[:]).Hex()
 		err = c.db.Transaction(func(tx *gorm.DB) error {
-			var channel Channel
 			result := tx.Where("channel_id = ?", channelID).First(&channel)
 			if result.Error != nil {
 				if errors.Is(result.Error, gorm.ErrRecordNotFound) {
