@@ -608,6 +608,14 @@ func HandleResizeChannel(rpc *RPCMessage, db *gorm.DB, signer *Signer) (*RPCMess
 		return nil, fmt.Errorf("asset not found: %s", channel.Token)
 	}
 
+	if params.ResizeAmount == nil {
+		params.ResizeAmount = big.NewInt(0)
+	}
+
+	if params.AllocateAmount == nil {
+		params.AllocateAmount = big.NewInt(0)
+	}
+
 	ledger := GetParticipantLedger(db, channel.Participant)
 	balance, err := ledger.Balance(channel.Participant, asset.Symbol)
 	if err != nil {
@@ -623,6 +631,7 @@ func HandleResizeChannel(rpc *RPCMessage, db *gorm.DB, signer *Signer) (*RPCMess
 	}
 	fmt.Println("channel amount:", channel.Amount)
 	fmt.Println("new channel amount:", newChannelAmount.String())
+
 	newChannelAmount.Add(newChannelAmount, params.ResizeAmount)
 
 	if newChannelAmount.Cmp(big.NewInt(0)) < 0 {
