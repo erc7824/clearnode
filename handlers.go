@@ -109,6 +109,17 @@ type ResizeChannelSignData struct {
 	Timestamp uint64
 }
 
+type LedgerEntryResponse struct {
+	ID          uint            `json:"id"`
+	AccountID   string          `json:"account_id"`
+	AccountType AccountType     `json:"account_type"`
+	Asset       string          `json:"asset"`
+	Participant string          `json:"participant"`
+	Credit      decimal.Decimal `json:"credit"`
+	Debit       decimal.Decimal `json:"debit"`
+	CreatedAt   time.Time       `json:"created_at"`
+}
+
 func (r ResizeChannelSignData) MarshalJSON() ([]byte, error) {
 	arr := []interface{}{r.RequestID, r.Method, r.Params, r.Timestamp}
 	return json.Marshal(arr)
@@ -262,7 +273,21 @@ func HandleGetLedgerEntries(rpc *RPCMessage, address string, db *gorm.DB) (*RPCM
 		return nil, fmt.Errorf("failed to find account: %w", err)
 	}
 
-	rpcResponse := CreateResponse(rpc.Req.RequestID, rpc.Req.Method, []any{entries}, time.Now())
+	response := make([]LedgerEntryResponse, len(entries))
+	for i, entry := range entries {
+		response[i] = LedgerEntryResponse{
+			ID:          entry.ID,
+			AccountID:   entry.AccountID,
+			AccountType: entry.AccountType,
+			Asset:       entry.AssetSymbol,
+			Participant: entry.Participant,
+			Credit:      entry.Credit,
+			Debit:       entry.Debit,
+			CreatedAt:   entry.CreatedAt,
+		}
+	}
+
+	rpcResponse := CreateResponse(rpc.Req.RequestID, rpc.Req.Method, []any{response}, time.Now())
 	return rpcResponse, nil
 }
 
@@ -862,46 +887,27 @@ func HandleGetChannels(rpc *RPCMessage, db *gorm.DB) (*RPCMessage, error) {
 		return nil, errors.New("missing participant parameter")
 	}
 
-	reqBytes, err := json.Marshal(rpc.Req)
+	channels, err := getChannelsForParticipant(db, participant)
 	if err != nil {
-		return nil, errors.New("error serializing message")
-	}
-
-	isValid, err := ValidateSignature(reqBytes, rpc.Sig[0], participant)
-	if err != nil || !isValid {
-		return nil, errors.New("invalid signature")
+		return nil, fmt.Errorf("failed to get channels: %w", err)
 	}
 
 	var channelResponses []ChannelResponse
-
-	err = db.Transaction(func(tx *gorm.DB) error {
-		channels, err := getChannelsForParticipant(tx, participant)
-		if err != nil {
-			return fmt.Errorf("failed to get channels: %w", err)
-		}
-
-		for _, channel := range channels {
-			channelResponses = append(channelResponses, ChannelResponse{
-				ChannelID:   channel.ChannelID,
-				Participant: channel.Participant,
-				Status:      channel.Status,
-				Token:       channel.Token,
-				Amount:      big.NewInt(int64(channel.Amount)),
-				ChainID:     channel.ChainID,
-				Adjudicator: channel.Adjudicator,
-				Challenge:   channel.Challenge,
-				Nonce:       channel.Nonce,
-				Version:     channel.Version,
-				CreatedAt:   channel.CreatedAt.Format(time.RFC3339),
-				UpdatedAt:   channel.UpdatedAt.Format(time.RFC3339),
-			})
-		}
-
-		return nil
-	})
-
-	if err != nil {
-		return nil, err
+	for _, channel := range channels {
+		channelResponses = append(channelResponses, ChannelResponse{
+			ChannelID:   channel.ChannelID,
+			Participant: channel.Participant,
+			Status:      channel.Status,
+			Token:       channel.Token,
+			Amount:      big.NewInt(int64(channel.Amount)),
+			ChainID:     channel.ChainID,
+			Adjudicator: channel.Adjudicator,
+			Challenge:   channel.Challenge,
+			Nonce:       channel.Nonce,
+			Version:     channel.Version,
+			CreatedAt:   channel.CreatedAt.Format(time.RFC3339),
+			UpdatedAt:   channel.UpdatedAt.Format(time.RFC3339),
+		})
 	}
 
 	rpcResponse := CreateResponse(rpc.Req.RequestID, rpc.Req.Method, []any{channelResponses}, time.Now())
@@ -930,6 +936,53 @@ func HandleGetRPCHistory(participant string, rpc *RPCMessage, store *RPCStore) (
 			ReqSig:    record.ReqSig,
 			ResSig:    record.ResSig,
 			Result:    string(record.Response),
+		})
+	}
+
+	rpcResponse := CreateResponse(rpc.Req.RequestID, rpc.Req.Method, []any{response}, time.Now())
+	return rpcResponse, nil
+}
+
+// AssetResponse represents an asset in the response
+type AssetResponse struct {
+	Token    string `json:"token"`    // Token address
+	ChainID  uint32 `json:"chain_id"` // Chain ID
+	Symbol   string `json:"symbol"`   // Symbol of the asset (e.g., "usdc")
+	Decimals uint8  `json:"decimals"` // Number of decimals for the asset
+}
+
+// HandleGetAssets returns all supported assets
+func HandleGetAssets(rpc *RPCMessage, db *gorm.DB) (*RPCMessage, error) {
+	var chainID *uint32
+
+	if len(rpc.Req.Params) > 0 {
+		paramsJSON, err := json.Marshal(rpc.Req.Params[0])
+		if err == nil {
+			var params map[string]interface{}
+			if err := json.Unmarshal(paramsJSON, &params); err == nil {
+				if chainIDValue, ok := params["chain_id"]; ok {
+					// Convert the chain_id to uint32
+					if chainIDFloat, ok := chainIDValue.(float64); ok {
+						chainIDUint := uint32(chainIDFloat)
+						chainID = &chainIDUint
+					}
+				}
+			}
+		}
+	}
+
+	assets, err := GetAllAssets(db, chainID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to retrieve assets: %w", err)
+	}
+
+	response := make([]AssetResponse, 0, len(assets))
+	for _, asset := range assets {
+		response = append(response, AssetResponse{
+			Token:    asset.Token,
+			ChainID:  asset.ChainID,
+			Symbol:   asset.Symbol,
+			Decimals: asset.Decimals,
 		})
 	}
 

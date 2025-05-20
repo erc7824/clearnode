@@ -32,3 +32,16 @@ func GetAssetBySymbol(db *gorm.DB, symbol string, chainID uint32) (*Asset, error
 	}
 	return &asset, err
 }
+
+// GetAllAssets returns all supported assets. If chainID is provided, it filters assets by that chain ID
+func GetAllAssets(db *gorm.DB, chainID *uint32) ([]Asset, error) {
+	var assets []Asset
+	query := db.Model(&Asset{})
+
+	if chainID != nil {
+		query = query.Where("chain_id = ?", *chainID)
+	}
+
+	err := query.Order("chain_id, symbol").Find(&assets).Error
+	return assets, err
+}

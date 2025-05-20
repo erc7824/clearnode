@@ -9,6 +9,7 @@
 | `auth_verify` | Completes authentication with a challenge response |
 | `ping` | Simple connectivity check |
 | `get_config` | Retrieves broker configuration and supported networks |
+| `get_assets` | Retrieves all supported assets (optionally filtered by chain_id) |
 | `get_app_definition` | Retrieves application definition for a ledger account |
 | `get_ledger_balances` | Lists participants and their balances for a ledger account |
 | `get_ledger_entries` | Retrieves detailed ledger entries for a participant |
@@ -173,7 +174,7 @@ Retrieves the detailed ledger entries for an account, providing a complete trans
       "id": 123,
       "account_id": "0x1234567890abcdef...",
       "account_type": 0,
-      "asset_symbol": "usdc",
+      "asset": "usdc",
       "participant": "0x1234567890abcdef...",
       "credit": "100.0",
       "debit": "0.0",
@@ -183,7 +184,7 @@ Retrieves the detailed ledger entries for an account, providing a complete trans
       "id": 124,
       "account_id": "0x1234567890abcdef...",
       "account_type": 0,
-      "asset_symbol": "usdc",
+      "asset": "usdc",
       "participant": "0x1234567890abcdef...",
       "credit": "0.0",
       "debit": "25.0",
@@ -205,7 +206,7 @@ Retrieves all channels for a participant (both open, closed, and joining), order
   "req": [1, "get_channels", [{
     "participant": "0x1234567890abcdef..."
   }], 1619123456789],
-  "sig": ["0x9876fedcba..."]
+  "sig": []
 }
 ```
 
@@ -272,7 +273,7 @@ Retrieves all RPC messages history for a participant, ordered by timestamp (newe
 ```json
 {
   "req": [4, "get_rpc_history", [], 1619123456789],
-  "sig": ["0x9876fedcba..."]
+  "sig": []
 }
 ```
 
@@ -631,7 +632,7 @@ Retrieves broker configuration information including supported networks.
 ```json
 {
   "req": [1, "get_config", [], 1619123456789],
-  "sig": ["0x9876fedcba..."]
+  "sig": []
 }
 ```
 
@@ -659,6 +660,56 @@ Retrieves broker configuration information including supported networks.
       }
     ]
   }], 1619123456789],
+  "sig": ["0xabcd1234..."]
+}
+```
+
+### Get Assets
+
+Retrieves all supported assets. Optionally, you can filter the assets by chain_id.
+
+**Request without filter:**
+
+```json
+{
+  "req": [1, "get_assets", [], 1619123456789],
+  "sig": []
+}
+```
+
+**Request with chain_id filter:**
+
+```json
+{
+  "req": [1, "get_assets", [{
+    "chain_id": 137
+  }], 1619123456789],
+  "sig": []
+}
+```
+
+**Response:**
+
+```json
+{
+  "res": [1, "get_assets", [[{
+    "token": "0xeeee567890abcdef...",
+    "chain_id": 137,
+    "symbol": "usdc",
+    "decimals": 6
+  },
+  {
+    "token": "0xffff567890abcdef...",
+    "chain_id": 137,
+    "symbol": "weth",
+    "decimals": 18
+  },
+  {
+    "token": "0xaaaa567890abcdef...",
+    "chain_id": 42220,
+    "symbol": "celo",
+    "decimals": 18
+  }]], 1619123456789],
   "sig": ["0xabcd1234..."]
 }
 ```

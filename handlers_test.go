@@ -322,8 +322,8 @@ func TestHandleCreateVirtualApp(t *testing.T) {
 	assert.Equal(t, decimal.NewFromInt(200).String(), vBalB.String())
 }
 
-// TestHandleListParticipants tests the list available channels handler functionality
-func TestHandleListParticipants(t *testing.T) {
+// TestHandleGetLedgerBalances tests the get ledger balances handler functionality
+func TestHandleGetLedgerBalances(t *testing.T) {
 	// Set up test database with cleanup
 	db, cleanup := setupTestDB(t)
 	defer cleanup()
@@ -359,28 +359,28 @@ func TestHandleListParticipants(t *testing.T) {
 	responseParams = msg.Res.Params
 	require.NotEmpty(t, responseParams)
 
-	// First parameter should be an array of ChannelAvailabilityResponse
-	channelsArray, ok := responseParams[0].([]Balance)
-	require.True(t, ok, "Response should contain an array of ChannelAvailabilityResponse")
+	// First parameter should be an array of Balance
+	balancesArray, ok := responseParams[0].([]Balance)
+	require.True(t, ok, "Response should contain an array of Balance")
 
-	// We should have 4 channels with positive balances (excluding closed one)
-	assert.Equal(t, 1, len(channelsArray), "Should have 4 channels")
+	// We should have 1 balance entry
+	assert.Equal(t, 1, len(balancesArray), "Should have 1 balance entry")
 
-	// Check the contents of each channel response
+	// Check the contents of each balance
 	expectedAssets := map[string]decimal.Decimal{
 		"usdc": decimal.NewFromInt(1000),
 	}
 
-	for _, ch := range channelsArray {
-		expectedBalance, exists := expectedAssets[ch.Asset]
-		assert.True(t, exists, "Unexpected address in response: %s", ch.Asset)
-		assert.Equal(t, expectedBalance, ch.Amount, "Incorrect balance for address %s", ch.Asset)
+	for _, balance := range balancesArray {
+		expectedBalance, exists := expectedAssets[balance.Asset]
+		assert.True(t, exists, "Unexpected asset in response: %s", balance.Asset)
+		assert.Equal(t, expectedBalance, balance.Amount, "Incorrect balance for asset %s", balance.Asset)
 
-		// Remove from map to ensure each address appears only once
-		delete(expectedAssets, ch.Asset)
+		// Remove from map to ensure each asset appears only once
+		delete(expectedAssets, balance.Asset)
 	}
 
-	assert.Empty(t, expectedAssets, "Not all expected addresses were found in the response")
+	assert.Empty(t, expectedAssets, "Not all expected assets were found in the response")
 }
 
 // TestHandleGetConfig tests the get config handler functionality
@@ -605,21 +605,6 @@ func TestHandleGetChannels(t *testing.T) {
 		assert.NotEmpty(t, ch.UpdatedAt, "UpdatedAt should not be empty")
 	}
 
-	// Test with invalid signature
-	invalidReq := &RPCMessage{
-		Req: &RPCData{
-			RequestID: 456,
-			Method:    "get_channels",
-			Params:    []any{json.RawMessage(paramsJSON)},
-			Timestamp: uint64(time.Now().Unix()),
-		},
-		Sig: []string{"0xInvalidSignature"},
-	}
-
-	_, err = HandleGetChannels(invalidReq, db)
-	assert.Error(t, err, "Should return error with invalid signature")
-	assert.Contains(t, err.Error(), "invalid signature", "Error should mention invalid signature")
-
 	// Test with missing participant parameter
 	missingParamReq := &RPCMessage{
 		Req: &RPCData{
@@ -634,6 +619,200 @@ func TestHandleGetChannels(t *testing.T) {
 	_, err = HandleGetChannels(missingParamReq, db)
 	assert.Error(t, err, "Should return error with missing participant")
 	assert.Contains(t, err.Error(), "missing participant", "Error should mention missing participant")
+}
+
+// TestHandleGetAssets tests the get assets handler functionality
+func TestHandleGetAssets(t *testing.T) {
+	// Set up test database with cleanup
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	// Create some test assets
+	testAssets := []Asset{
+		{
+			Token:    "0xToken1",
+			ChainID:  137, // Polygon
+			Symbol:   "usdc",
+			Decimals: 6,
+		},
+		{
+			Token:    "0xToken2",
+			ChainID:  137, // Polygon
+			Symbol:   "weth",
+			Decimals: 18,
+		},
+		{
+			Token:    "0xToken3",
+			ChainID:  42220, // Celo
+			Symbol:   "celo",
+			Decimals: 18,
+		},
+		{
+			Token:    "0xToken4",
+			ChainID:  8453, // Base
+			Symbol:   "usdbc",
+			Decimals: 6,
+		},
+	}
+
+	for _, asset := range testAssets {
+		require.NoError(t, db.Create(&asset).Error)
+	}
+
+	// Test Case 1: Get all assets
+	rpcRequest1 := &RPCMessage{
+		Req: &RPCData{
+			RequestID: 1,
+			Method:    "get_assets",
+			Params:    []any{},
+			Timestamp: uint64(time.Now().Unix()),
+		},
+		Sig: []string{"dummy-signature"},
+	}
+
+	// Call the handler
+	resp1, err := HandleGetAssets(rpcRequest1, db)
+	require.NoError(t, err)
+	assert.NotNil(t, resp1)
+
+	// Verify response format
+	assert.Equal(t, "get_assets", resp1.Res.Method)
+	assert.Equal(t, uint64(1), resp1.Res.RequestID)
+	require.Len(t, resp1.Res.Params, 1, "Response should contain an array of AssetResponse objects")
+
+	// Extract and verify assets
+	assets1, ok := resp1.Res.Params[0].([]AssetResponse)
+	require.True(t, ok, "Response parameter should be a slice of AssetResponse")
+	assert.Len(t, assets1, 4, "Should return all 4 assets")
+
+	// Verify specific asset details
+	foundSymbols := make(map[string]bool)
+	for _, asset := range assets1 {
+		foundSymbols[asset.Symbol] = true
+
+		// Find original asset to compare with
+		var originalAsset Asset
+		for _, a := range testAssets {
+			if a.Symbol == asset.Symbol && a.ChainID == asset.ChainID {
+				originalAsset = a
+				break
+			}
+		}
+
+		assert.Equal(t, originalAsset.Token, asset.Token, "Token should match")
+		assert.Equal(t, originalAsset.ChainID, asset.ChainID, "ChainID should match")
+		assert.Equal(t, originalAsset.Decimals, asset.Decimals, "Decimals should match")
+	}
+
+	assert.Len(t, foundSymbols, 4, "Should have found 4 unique symbols")
+	assert.True(t, foundSymbols["usdc"], "Should include USDC")
+	assert.True(t, foundSymbols["weth"], "Should include WETH")
+	assert.True(t, foundSymbols["celo"], "Should include CELO")
+	assert.True(t, foundSymbols["usdbc"], "Should include USDBC")
+
+	// Test Case 2: Filter by chain_id (Polygon)
+	chainID := float64(137) // Polygon
+	params2 := map[string]interface{}{
+		"chain_id": chainID,
+	}
+	paramsJSON2, err := json.Marshal(params2)
+	require.NoError(t, err)
+
+	rpcRequest2 := &RPCMessage{
+		Req: &RPCData{
+			RequestID: 2,
+			Method:    "get_assets",
+			Params:    []any{json.RawMessage(paramsJSON2)},
+			Timestamp: uint64(time.Now().Unix()),
+		},
+		Sig: []string{"dummy-signature"},
+	}
+
+	// Call the handler with chain_id filter
+	resp2, err := HandleGetAssets(rpcRequest2, db)
+	require.NoError(t, err)
+	assert.NotNil(t, resp2)
+
+	// Verify response format for filtered assets
+	assert.Equal(t, "get_assets", resp2.Res.Method)
+	assert.Equal(t, uint64(2), resp2.Res.RequestID)
+
+	// Extract and verify filtered assets
+	assets2, ok := resp2.Res.Params[0].([]AssetResponse)
+	require.True(t, ok, "Response parameter should be a slice of AssetResponse")
+	assert.Len(t, assets2, 2, "Should return 2 Polygon assets")
+
+	// Ensure all returned assets are for Polygon
+	for _, asset := range assets2 {
+		assert.Equal(t, uint32(137), asset.ChainID, "ChainID should be Polygon (137)")
+	}
+
+	// Verify the symbols of the returned assets
+	symbols := make(map[string]bool)
+	for _, asset := range assets2 {
+		symbols[asset.Symbol] = true
+	}
+	assert.Len(t, symbols, 2, "Should have 2 unique symbols")
+	assert.True(t, symbols["usdc"], "Should include USDC on Polygon")
+	assert.True(t, symbols["weth"], "Should include WETH on Polygon")
+
+	// Test Case 3: Filter by chain_id (Celo)
+	chainID = float64(42220) // Celo
+	params3 := map[string]interface{}{
+		"chain_id": chainID,
+	}
+	paramsJSON3, err := json.Marshal(params3)
+	require.NoError(t, err)
+
+	rpcRequest3 := &RPCMessage{
+		Req: &RPCData{
+			RequestID: 3,
+			Method:    "get_assets",
+			Params:    []any{json.RawMessage(paramsJSON3)},
+			Timestamp: uint64(time.Now().Unix()),
+		},
+		Sig: []string{"dummy-signature"},
+	}
+
+	// Call the handler with chain_id filter
+	resp3, err := HandleGetAssets(rpcRequest3, db)
+	require.NoError(t, err)
+	assert.NotNil(t, resp3)
+
+	// Extract and verify filtered assets
+	assets3, ok := resp3.Res.Params[0].([]AssetResponse)
+	require.True(t, ok, "Response parameter should be a slice of AssetResponse")
+	assert.Len(t, assets3, 1, "Should return 1 Celo asset")
+	assert.Equal(t, "celo", assets3[0].Symbol, "Should be CELO")
+	assert.Equal(t, uint32(42220), assets3[0].ChainID, "ChainID should be Celo (42220)")
+
+	// Test Case 4: Filter by non-existent chain_id
+	chainID = float64(1) // Ethereum Mainnet (not in our test data)
+	params4 := map[string]interface{}{
+		"chain_id": chainID,
+	}
+	paramsJSON4, err := json.Marshal(params4)
+	require.NoError(t, err)
+
+	rpcRequest4 := &RPCMessage{
+		Req: &RPCData{
+			RequestID: 4,
+			Method:    "get_assets",
+			Params:    []any{json.RawMessage(paramsJSON4)},
+			Timestamp: uint64(time.Now().Unix()),
+		},
+		Sig: []string{"dummy-signature"},
+	}
+
+	// Call the handler with non-existent chain_id filter
+	resp4, err := HandleGetAssets(rpcRequest4, db)
+	require.NoError(t, err)
+	assert.NotNil(t, resp4)
+
+	// Extract and verify filtered assets (should be empty)
+	assets4, ok := resp4.Res.Params[0].([]AssetResponse)
+	require.True(t, ok, "Response parameter should be a slice of AssetResponse")
+	assert.Len(t, assets4, 0, "Should return 0 assets for non-existent chain_id")
 }
 
 func TestHandleGetRPCHistory(t *testing.T) {
@@ -719,9 +898,9 @@ func TestHandleGetRPCHistory(t *testing.T) {
 	assert.Equal(t, "get_rpc_history", response.Res.Method)
 	assert.Equal(t, uint64(100), response.Res.RequestID)
 
-	require.Len(t, response.Res.Params, 1, "Response should contain a RPCHistoryResponse")
+	require.Len(t, response.Res.Params, 1, "Response should contain RPCEntry entries")
 	rpcHistory, ok := response.Res.Params[0].([]RPCEntry)
-	require.True(t, ok, "Response parameter should be a RPCHistoryResponse")
+	require.True(t, ok, "Response parameter should be a slice of RPCEntry")
 
 	assert.Len(t, rpcHistory, 3, "Should return 3 records for the participant")
 
@@ -799,14 +978,15 @@ func TestHandleGetLedgerEntries(t *testing.T) {
 	require.Len(t, resp1.Res.Params, 1, "Response should contain an array of Entry objects")
 
 	// Extract and verify entries
-	entries1, ok := resp1.Res.Params[0].([]Entry)
+	entries1, ok := resp1.Res.Params[0].([]LedgerEntryResponse)
 	require.True(t, ok, "Response parameter should be a slice of Entry")
+
 	assert.Len(t, entries1, 5, "Should return all 5 entries")
 
 	// Count entries by asset
 	assetCounts := map[string]int{}
 	for _, entry := range entries1 {
-		assetCounts[entry.AssetSymbol]++
+		assetCounts[entry.Asset]++
 		assert.Equal(t, participant, entry.AccountID)
 		assert.Equal(t, participant, entry.Participant)
 	}
@@ -841,13 +1021,13 @@ func TestHandleGetLedgerEntries(t *testing.T) {
 	assert.Equal(t, uint64(2), resp2.Res.RequestID)
 
 	// Extract and verify entries for specific asset
-	entries2, ok := resp2.Res.Params[0].([]Entry)
+	entries2, ok := resp2.Res.Params[0].([]LedgerEntryResponse)
 	require.True(t, ok, "Response parameter should be a slice of Entry")
 	assert.Len(t, entries2, 3, "Should return 3 USDC entries")
 
 	// Ensure all entries are for USDC
 	for _, entry := range entries2 {
-		assert.Equal(t, "usdc", entry.AssetSymbol)
+		assert.Equal(t, "usdc", entry.Asset)
 		assert.Equal(t, participant, entry.AccountID)
 		assert.Equal(t, participant, entry.Participant)
 	}
