@@ -55,7 +55,7 @@ func (m *RPCData) UnmarshalJSON(data []byte) error {
 	}
 
 	// Validate array length
-	if len(rawMsg) != 5 {
+	if len(rawMsg) != 4 {
 		return errors.New("invalid message format: expected 4 elements")
 	}
 

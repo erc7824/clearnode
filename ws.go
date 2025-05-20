@@ -414,7 +414,7 @@ func forwardMessage(rpc *RPCMessage, msg []byte, fromAddress string, h *UnifiedW
 // sendErrorResponse creates and sends an error response to the client
 func (h *UnifiedWSHandler) sendErrorResponse(sender string, rpc *RPCMessage, conn *websocket.Conn, errMsg string) {
 	reqID := uint64(0)
-	if rpc.Req != nil {
+	if rpc != nil && rpc.Req != nil {
 		reqID = rpc.Req.RequestID
 	}
 	response := CreateResponse(reqID, "error", []any{map[string]any{
