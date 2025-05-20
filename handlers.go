@@ -237,7 +237,7 @@ func HandleGetLedgerBalances(rpc *RPCMessage, address string, db *gorm.DB) (*RPC
 }
 
 func HandleGetLedgerEntries(rpc *RPCMessage, address string, db *gorm.DB) (*RPCMessage, error) {
-	var participantAccount string
+	var accountID string
 	var asset string
 
 	if len(rpc.Req.Params) > 0 {
@@ -245,27 +245,19 @@ func HandleGetLedgerEntries(rpc *RPCMessage, address string, db *gorm.DB) (*RPCM
 		if err == nil {
 			var params map[string]string
 			if err := json.Unmarshal(paramsJSON, &params); err == nil {
-				participantAccount = params["participant"]
+				accountID = params["account_id"]
 				asset = params["asset"]
 			}
 		}
 	}
 
-	if participantAccount == "" {
-		return nil, errors.New("missing participant account")
+	if accountID == "" {
+		return nil, errors.New("missing account_id")
 	}
 
 	ledger := GetParticipantLedger(db, address)
-	if asset != "" {
-		entries, err := ledger.GetAllEntriesByAsset(participantAccount, asset)
-		if err != nil {
-			return nil, fmt.Errorf("failed to find account: %w", err)
-		}
-		rpcResponse := CreateResponse(rpc.Req.RequestID, rpc.Req.Method, []any{entries}, time.Now())
-		return rpcResponse, nil
-	}
 
-	entries, err := ledger.GetAllEntries(participantAccount)
+	entries, err := ledger.GetEntries(accountID, asset)
 	if err != nil {
 		return nil, fmt.Errorf("failed to find account: %w", err)
 	}

@@ -150,14 +150,14 @@ Retrieves the balances of all participants in a specific ledger account.
 
 ### Get Ledger Entries
 
-Retrieves the detailed ledger entries for a participant, providing a complete transaction history. This can be used to audit all deposits, withdrawals, and transfers.
+Retrieves the detailed ledger entries for an account, providing a complete transaction history. This can be used to audit all deposits, withdrawals, and transfers.
 
 **Request:**
 
 ```json
 {
   "req": [1, "get_ledger_entries", [{
-    "participant": "0x1234567890abcdef...",
+    "account_id": "0x1234567890abcdef...",
     "asset": "usdc"  // Optional: filter by asset
   }], 1619123456789],
   "sig": ["0x9876fedcba..."]

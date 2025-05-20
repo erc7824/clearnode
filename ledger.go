@@ -95,17 +95,14 @@ func (l *ParticipantLedger) GetBalances(accountID string) ([]Balance, error) {
 	return balances, nil
 }
 
-func (l *ParticipantLedger) GetAllEntries(accountID string) ([]Entry, error) {
+func (l *ParticipantLedger) GetEntries(accountID, assetSymbol string) ([]Entry, error) {
 	var entries []Entry
-	if err := l.db.Where("account_id = ? AND participant = ?", accountID, l.participant).Find(&entries).Error; err != nil {
-		return nil, err
+	q := l.db.Where("account_id = ? AND participant = ?", accountID, l.participant)
+	if assetSymbol != "" {
+		q = q.Where("asset_symbol = ?", assetSymbol)
 	}
-	return entries, nil
-}
 
-func (l *ParticipantLedger) GetAllEntriesByAsset(accountID string, assetSymbol string) ([]Entry, error) {
-	var entries []Entry
-	if err := l.db.Where("account_id = ? AND asset_symbol = ? AND participant = ?", accountID, assetSymbol, l.participant).Find(&entries).Error; err != nil {
+	if err := q.Find(&entries).Error; err != nil {
 		return nil, err
 	}
 	return entries, nil

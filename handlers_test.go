@@ -773,7 +773,7 @@ func TestHandleGetLedgerEntries(t *testing.T) {
 
 	// Test Case 1: Get all entries for the participant
 	params1 := map[string]string{
-		"participant": participant,
+		"account_id": participant,
 	}
 	paramsJSON1, err := json.Marshal(params1)
 	require.NoError(t, err)
@@ -815,8 +815,8 @@ func TestHandleGetLedgerEntries(t *testing.T) {
 
 	// Test Case 2: Get entries for a specific asset
 	params2 := map[string]string{
-		"participant": participant,
-		"asset":       "usdc",
+		"account_id": participant,
+		"asset":      "usdc",
 	}
 	paramsJSON2, err := json.Marshal(params2)
 	require.NoError(t, err)
