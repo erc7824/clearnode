@@ -120,7 +120,7 @@ func (c *Custody) handleBlockChainEvent(l types.Log) {
 		ev, err := c.custody.ParseCreated(l)
 		log.Printf("[Created] Event data: %+v\n", ev)
 		if err != nil {
-			fmt.Println("error parsing Created event:", err)
+			log.Println("error parsing Created event:", err)
 			return
 		}
 
@@ -137,7 +137,7 @@ func (c *Custody) handleBlockChainEvent(l types.Log) {
 
 		// Check if channel was created with the broker.
 		if participantB != c.signer.GetAddress() {
-			fmt.Printf("participantB [%s] is not Broker[%s]: ", participantB, c.signer.GetAddress().Hex())
+			log.Printf("participantB %s is not Broker %s\n", participantB, c.signer.GetAddress().Hex())
 			return
 		}
 
@@ -325,7 +325,7 @@ func (c *Custody) handleBlockChainEvent(l types.Log) {
 
 		c.sendChannelUpdate(channel)
 	default:
-		fmt.Println("Unknown event ID:", eventID.Hex())
+		log.Println("Unknown event ID:", eventID.Hex())
 	}
 }
 
