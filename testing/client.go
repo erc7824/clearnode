@@ -5,8 +5,9 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
-	"io/ioutil"
+
 	"log"
+	"net"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -111,12 +112,12 @@ func savePrivateKey(key *ecdsa.PrivateKey, filePath string) error {
 		return err
 	}
 
-	return ioutil.WriteFile(filePath, []byte(keyHex), 0600)
+	return os.WriteFile(filePath, []byte(keyHex), 0600)
 }
 
 // loadPrivateKey loads a private key from file
 func loadPrivateKey(filePath string) (*ecdsa.PrivateKey, error) {
-	keyHex, err := ioutil.ReadFile(filePath)
+	keyHex, err := os.ReadFile(filePath)
 	if err != nil {
 		return nil, err
 	}
@@ -343,7 +344,7 @@ func main() {
 	)
 
 	flag.Parse()
-	
+
 	// If genkey flag is set, generate a private key and exit
 	if *genKeyFlag {
 		currentDir, err := os.Getwd()
@@ -351,34 +352,34 @@ func main() {
 			log.Fatalf("Error getting current directory: %v", err)
 		}
 		keyPath := filepath.Join(currentDir, keyFileName)
-		
+
 		// Generate new key
 		key, err := generatePrivateKey()
 		if err != nil {
 			log.Fatalf("Error generating private key: %v", err)
 		}
-		
+
 		// Save the key
 		if err := savePrivateKey(key, keyPath); err != nil {
 			log.Fatalf("Error saving private key: %v", err)
 		}
-		
+
 		// Create signer to display address
 		signer, err := NewSigner(hexutil.Encode(crypto.FromECDSA(key)))
 		if err != nil {
 			log.Fatalf("Error creating signer: %v", err)
 		}
-		
+
 		fmt.Printf("Generated new private key at: %s\n", keyPath)
 		fmt.Printf("Ethereum Address: %s\n", signer.GetAddress())
-		
+
 		// Read and display the key for convenience
-		keyHex, err := ioutil.ReadFile(keyPath)
+		keyHex, err := os.ReadFile(keyPath)
 		if err != nil {
 			log.Fatalf("Error reading key file: %v", err)
 		}
 		fmt.Printf("Private Key (add 0x prefix for MetaMask): %s\n", string(keyHex))
-		
+
 		os.Exit(0)
 	}
 
@@ -468,24 +469,47 @@ func main() {
 			log.Fatalf("Error sending message: %v", err)
 		}
 
-		// Wait for response
-		_, respMsg, err := client.conn.ReadMessage()
-		if err != nil {
-			log.Fatalf("Error reading response: %v", err)
-		}
+		// Keep reading responses until there's an error
+		fmt.Println("\nServer responses:")
+		responseCount := 0
 
-		// Pretty print the response
-		var respObj map[string]any
-		if err := json.Unmarshal(respMsg, &respObj); err != nil {
-			log.Fatalf("Error parsing response: %v", err)
-		}
+		for {
+			// Set a read deadline to avoid waiting indefinitely
+			client.conn.SetReadDeadline(time.Now().Add(2 * time.Second))
 
-		respOut, err := json.MarshalIndent(respObj, "", "  ")
-		if err != nil {
-			log.Fatalf("Error marshaling response: %v", err)
-		}
+			_, respMsg, err := client.conn.ReadMessage()
+			if err != nil {
+				// Check if this is just a timeout (no more messages)
+				if websocket.IsCloseError(err, websocket.CloseNormalClosure) || websocket.IsUnexpectedCloseError(err) || err.Error() == "websocket: close 1000 (normal)" {
+					fmt.Println("Connection closed by server.")
+					break
+				} else if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+					// This is a timeout, likely no more messages
+					if responseCount > 0 {
+						fmt.Println("No more messages received.")
+					} else {
+						fmt.Println("No response received within timeout period.")
+					}
+					break
+				}
 
-		fmt.Println("\nServer response:")
-		fmt.Println(string(respOut))
+				log.Fatalf("Error reading response: %v", err)
+			}
+
+			// Pretty print the response
+			var respObj map[string]any
+			if err := json.Unmarshal(respMsg, &respObj); err != nil {
+				log.Fatalf("Error parsing response: %v", err)
+			}
+
+			respOut, err := json.MarshalIndent(respObj, "", "  ")
+			if err != nil {
+				log.Fatalf("Error marshaling response: %v", err)
+			}
+
+			fmt.Printf("\nResponse #%d:\n", responseCount+1)
+			fmt.Println(string(respOut))
+			responseCount++
+		}
 	}
 }
