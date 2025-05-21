@@ -7,19 +7,14 @@ config:
     port: 5432
     name: clearnet_uat
     user: clearnet_uat_admin
-    password: ref+tfstategs://terraform-state-deploy/gke-uat-postgresql-admin/default.tfstate/output.postgresql_user_passwords["clearnet_uat_admin"]
   envSecret: ""
   extraEnvs:
-    POLYGON_CUSTODY_CONTRACT_ADDRESS: "0x461B74f2fB8DaB2Dda51ed3E82ad43Ba67153E54"
-    ETH_SEPOLIA_CUSTODY_CONTRACT_ADDRESS: "0xa3f2f64455c9f8D68d9dCAeC2605D64680FaF898"
-  secretEnvs:
-    BROKER_PRIVATE_KEY: ref+gcpsecrets://ynet-stage/clearnet-uat-broker-private-key?version=latest
-    POLYGON_INFURA_URL: ref+gcpsecrets://ynet-stage/clearnet-uat-polygon-infura-url?version=latest
-    ETH_SEPOLIA_INFURA_URL: ref+gcpsecrets://ynet-stage/clearnet-uat-eth-sepolia-infura-url?version=latest
+    POLYGON_CUSTODY_CONTRACT_ADDRESS: "0xEe51DE64ca10B802E24A3D4caD78213a7d847e64"
+    ETH_SEPOLIA_CUSTODY_CONTRACT_ADDRESS: "0xEd44dba5ECB7928032649EF0075258FA3aca508B"
 
 image:
   repository: ghcr.io/erc7824/clearnode
-  tag: f289eeb
+  tag: 0.0.1-rc.12
 
 service:
   http:
