@@ -14,9 +14,10 @@ import (
 // - {PREFIX}_INFURA_URL: The Infura endpoint URL for the network
 // - {PREFIX}_CUSTODY_CONTRACT_ADDRESS: The custody contract address
 var knownNetworks = map[string]uint32{
-	"POLYGON": 137,
-	"CELO":    42220,
-	"BASE":    8453,
+	"POLYGON":     137,
+	"ETH_SEPOLIA": 11155111,
+	"CELO":        42220,
+	"BASE":        8453,
 }
 
 // NetworkConfig represents configuration for a blockchain network

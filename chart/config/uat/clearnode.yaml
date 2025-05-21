@@ -11,9 +11,11 @@ config:
   envSecret: ""
   extraEnvs:
     POLYGON_CUSTODY_CONTRACT_ADDRESS: "0xEe51DE64ca10B802E24A3D4caD78213a7d847e64"
+    ETH_SEPOLIA_CUSTODY_CONTRACT_ADDRESS: "0xEd44dba5ECB7928032649EF0075258FA3aca508B"
   secretEnvs:
     BROKER_PRIVATE_KEY: ref+gcpsecrets://ynet-stage/clearnet-uat-broker-private-key?version=latest
     POLYGON_INFURA_URL: ref+gcpsecrets://ynet-stage/clearnet-uat-polygon-infura-url?version=latest
+    ETH_SEPOLIA_INFURA_URL: ref+gcpsecrets://ynet-stage/clearnet-uat-eth-sepolia-infura-url?version=latest
 
 image:
   repository: ghcr.io/erc7824/clearnode
