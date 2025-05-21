@@ -26,7 +26,7 @@ ALTER TABLE assets ADD PRIMARY KEY(token, chain_id);
 
 CREATE TABLE ledger (
     id SERIAL PRIMARY KEY,
-    account_id BIGINT NOT NULL,
+    account_id VARCHAR NOT NULL,
     account_type BIGINT NOT NULL,
     asset_symbol VARCHAR NOT NULL,
     participant VARCHAR NOT NULL,
