@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"embed"
 	"log"
 	"net/http"
 	"os"
@@ -12,13 +13,16 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
+//go:embed config/migrations/*/*.sql
+var embedMigrations embed.FS
+
 func main() {
 	config, err := LoadConfig()
 	if err != nil {
 		log.Fatalf("failed to load configuration: %v", err)
 	}
 
-	db, err := setupDatabase(config.dbURL)
+	db, err := ConnectToDB(config.dbConf)
 	if err != nil {
 		log.Fatalf("Failed to setup database: %v", err)
 	}

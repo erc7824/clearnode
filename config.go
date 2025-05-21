@@ -5,10 +5,8 @@ import (
 	"os"
 	"strings"
 
+	"github.com/ilyakaznacheev/cleanenv"
 	"github.com/joho/godotenv"
-	"gorm.io/driver/postgres"
-	"gorm.io/driver/sqlite"
-	"gorm.io/gorm"
 )
 
 // knownNetworks maps network name prefixes to their respective chain IDs.
@@ -32,28 +30,35 @@ type NetworkConfig struct {
 // Config represents the overall application configuration
 type Config struct {
 	networks      map[string]*NetworkConfig
-	dbURL         string
 	privateKeyHex string
+	dbConf        DatabaseConfig
 }
 
 // LoadConfig builds configuration from environment variables
 func LoadConfig() (*Config, error) {
+	var err error
 	// Load environment variables
-	if err := godotenv.Load(); err != nil {
+	if err = godotenv.Load(); err != nil {
 		log.Println("Warning: .env file not found")
 	}
 
-	// Get database URL and driver from environment variables
-	dbURL := os.Getenv("DATABASE_URL")
-	dbDriver := os.Getenv("DATABASE_DRIVER")
+	// Get database URL from environment variables
+	var dbConf DatabaseConfig
+	dbURL := os.Getenv("CLEARNODE_DATABASE_URL")
 
-	// Set default connection string based on driver
-	if dbURL == "" {
-		switch dbDriver {
-		case "postgres":
-			dbURL = "postgres://postgres:postgres@localhost:5432/clearnet?sslmode=disable"
-		case "sqlite", "":
-			dbURL = "file:clearnet.db?cache=shared"
+	// If DATABASE_URL is not empty, parse the connection string
+	// Otherwise, read the envs in usual way
+	if dbURL != "" {
+		dbConf, err = ParseConnectionString(dbURL)
+		if err != nil {
+			logger.Errorw("failed to parse connection string", "err", err)
+			return nil, err
+		}
+	} else {
+		// Read db config
+		if err := cleanenv.ReadEnv(&dbConf); err != nil {
+			logger.Errorw("failed to read env", "err", err)
+			return nil, err
 		}
 	}
 
@@ -65,8 +70,8 @@ func LoadConfig() (*Config, error) {
 
 	config := Config{
 		networks:      make(map[string]*NetworkConfig),
-		dbURL:         dbURL,
 		privateKeyHex: privateKeyHex,
+		dbConf:        dbConf,
 	}
 
 	// Process each network
@@ -105,35 +110,4 @@ func LoadConfig() (*Config, error) {
 	}
 
 	return &config, nil
-}
-
-// setupDatabase initializes the database connection and performs migrations.
-func setupDatabase(dsn string) (*gorm.DB, error) {
-	var db *gorm.DB
-	var err error
-
-	// Determine which database driver to use based on DSN prefix
-	if dsn == "" {
-		dsn = "file:clearnet.db?cache=shared"
-		log.Println("Using SQLite database with default connection string")
-		db, err = gorm.Open(sqlite.Open(dsn), &gorm.Config{})
-	} else if len(dsn) >= 4 && dsn[:4] == "file" || len(dsn) >= 6 && dsn[:6] == "sqlite" {
-		log.Println("Using SQLite database")
-		db, err = gorm.Open(sqlite.Open(dsn), &gorm.Config{})
-	} else {
-		log.Println("Using PostgreSQL database")
-		db, err = gorm.Open(postgres.Open(dsn), &gorm.Config{})
-	}
-
-	if err != nil {
-		return nil, err
-	}
-
-	// Auto-migrate the models.
-	log.Println("Running database migrations...")
-	if err := db.AutoMigrate(&Entry{}, &Channel{}, &AppSession{}, &RPCRecord{}, &Asset{}); err != nil {
-		return nil, err
-	}
-	log.Println("Database migrations completed successfully")
-	return db, nil
 }
