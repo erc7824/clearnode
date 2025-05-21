@@ -224,7 +224,7 @@ func (c *Custody) handleBlockChainEvent(l types.Log) {
 
 			ledger := GetParticipantLedger(tx, channel.Participant)
 			if err := ledger.Record(channel.Participant, asset.Symbol, tokenAmount); err != nil {
-				log.Printf("[Closed] Error recording balance update for participant A: %v", err)
+				log.Printf("[Joined] Error recording balance update for participant A: %v", err)
 				return err
 			}
 
@@ -240,7 +240,7 @@ func (c *Custody) handleBlockChainEvent(l types.Log) {
 	case custodyAbi.Events["Closed"].ID:
 		ev, err := c.custody.ParseClosed(l)
 		if err != nil {
-			log.Println("error parsing ChannelJoined event:", err)
+			log.Println("error parsing ChannelClosed event:", err)
 			return
 		}
 		log.Printf("Closed event data: %+v\n", ev)
@@ -256,15 +256,6 @@ func (c *Custody) handleBlockChainEvent(l types.Log) {
 				return fmt.Errorf("error finding channel: %w", result.Error)
 			}
 
-			// Update the channel status to "closed"
-			channel.Status = ChannelStatusClosed
-			channel.Amount = 0
-			channel.UpdatedAt = time.Now()
-			channel.Version++
-			if err := tx.Save(&channel).Error; err != nil {
-				return fmt.Errorf("failed to close channel: %w", err)
-			}
-
 			asset, err := GetAssetByToken(tx, channel.Token, c.chainID)
 			if err != nil {
 				return fmt.Errorf("DB error fetching asset: %w", err)
@@ -275,10 +266,20 @@ func (c *Custody) handleBlockChainEvent(l types.Log) {
 			}
 
 			tokenAmount := decimal.NewFromBigInt(big.NewInt(int64(channel.Amount)), -int32(asset.Decimals))
+
 			ledger := GetParticipantLedger(tx, channel.Participant)
 			if err := ledger.Record(channel.Participant, asset.Symbol, tokenAmount.Neg()); err != nil {
-				log.Printf("[Closed] Error recording balance update for participant A: %v", err)
+				log.Printf("[Closed] Error recording balance update for participant: %v", err)
 				return err
+			}
+
+			// Update the channel status to "closed"
+			channel.Status = ChannelStatusClosed
+			channel.Amount = 0
+			channel.UpdatedAt = time.Now()
+			channel.Version++
+			if err := tx.Save(&channel).Error; err != nil {
+				return fmt.Errorf("failed to close channel: %w", err)
 			}
 
 			log.Printf("Closed channel with ID: %s", channelID)
@@ -295,7 +296,7 @@ func (c *Custody) handleBlockChainEvent(l types.Log) {
 	case custodyAbi.Events["Resized"].ID:
 		ev, err := c.custody.ParseResized(l)
 		if err != nil {
-			log.Println("error parsing ChannelJoined event:", err)
+			log.Println("error parsing ChannelResized event:", err)
 			return
 		}
 		log.Printf("Resized event data: %+v\n", ev)
