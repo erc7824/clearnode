@@ -701,7 +701,7 @@ func HandleResizeChannel(rpc *RPCMessage, db *gorm.DB, signer *Signer) (*RPCMess
 		},
 	}
 
-	resizeAmounts := []*big.Int{new(big.Int).Neg(params.ResizeAmount), new(big.Int).Neg(params.AllocateAmount)}
+	resizeAmounts := []*big.Int{new(big.Int).Neg(params.ResizeAmount), params.AllocateAmount}
 
 	intentionType, err := abi.NewType("int256[]", "", nil)
 	if err != nil {
