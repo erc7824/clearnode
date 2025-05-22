@@ -19,6 +19,7 @@ var knownNetworks = map[string]uint32{
 	"ETH_SEPOLIA": 11155111,
 	"CELO":        42220,
 	"BASE":        8453,
+	"WORLD_CHAIN": 480,
 }
 
 // NetworkConfig represents configuration for a blockchain network
