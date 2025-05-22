@@ -290,6 +290,14 @@ func (h *UnifiedWSHandler) HandleConnection(w http.ResponseWriter, r *http.Reque
 			}
 			h.sendBalanceUpdate(address)
 
+		case "get_app_sessions":
+			rpcResponse, handlerErr = HandleGetAppSessions(&msg, h.db)
+			if handlerErr != nil {
+				log.Printf("Error handling get_app_sessions: %v", handlerErr)
+				h.sendErrorResponse(address, &msg, conn, "Failed to get app sessions: "+handlerErr.Error())
+				continue
+			}
+
 		case "resize_channel":
 			rpcResponse, handlerErr = HandleResizeChannel(&msg, h.db, h.signer)
 			if handlerErr != nil {

@@ -1,7 +1,10 @@
 package main
 
 import (
+	"fmt"
+
 	"github.com/lib/pq"
+	"gorm.io/gorm"
 )
 
 // AppSession represents a virtual payment application session between participants
@@ -20,4 +23,26 @@ type AppSession struct {
 
 func (AppSession) TableName() string {
 	return "app_sessions"
+}
+
+// getAppSessionsForParticipant finds all channels for a participant
+func getAppSessionsForParticipant(tx *gorm.DB, participant string, status string) ([]AppSession, error) {
+	var sessions []AppSession
+	switch tx.Dialector.Name() {
+	case "postgres":
+		tx = tx.Where("? = ANY(participants)", participant)
+	case "sqlite":
+		tx = tx.Where("instr(participants, ?) > 0", participant)
+	default:
+		return nil, fmt.Errorf("unsupported database driver: %s", tx.Dialector.Name())
+	}
+	if status != "" {
+		tx = tx.Where("status = ?", status)
+	}
+
+	if err := tx.Find(&sessions).Error; err != nil {
+		return nil, err
+	}
+
+	return sessions, nil
 }
