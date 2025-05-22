@@ -213,6 +213,12 @@ func (h *UnifiedWSHandler) HandleConnection(w http.ResponseWriter, r *http.Reque
 			continue
 		}
 
+		if err = ValidateTimestamp(msg.Req.Timestamp, h.config.msgExpiryTime); err != nil {
+			log.Printf("Message timestamp validation failed: %v", err)
+			h.sendErrorResponse(address, &msg, conn, fmt.Sprintf("Message timestamp validation failed: %v", err))
+			continue
+		}
+
 		var rpcResponse = &RPCMessage{}
 		var handlerErr error
 
@@ -432,7 +438,7 @@ func forwardMessage(rpc *RPCMessage, msg []byte, fromAddress string, h *UnifiedW
 
 // sendErrorResponse creates and sends an error response to the client
 func (h *UnifiedWSHandler) sendErrorResponse(sender string, rpc *RPCMessage, conn *websocket.Conn, errMsg string) {
-	reqID := uint64(0)
+	reqID := uint64(time.Now().UnixMilli())
 	if rpc != nil && rpc.Req != nil {
 		reqID = rpc.Req.RequestID
 	}
@@ -487,7 +493,7 @@ func (h *UnifiedWSHandler) sendErrorResponse(sender string, rpc *RPCMessage, con
 // sendErrorResponse creates and sends an error response to the client
 func (h *UnifiedWSHandler) sendBalanceUpdate(sender string) {
 	balances, err := GetParticipantLedger(h.db, sender).GetBalances(sender)
-	response := CreateResponse(uint64(time.Now().UnixNano()), "bu", []any{balances}, time.Now())
+	response := CreateResponse(uint64(time.Now().UnixMilli()), "bu", []any{balances}, time.Now())
 
 	byteData, _ := json.Marshal(response.Req)
 	signature, _ := h.signer.Sign(byteData)
@@ -533,7 +539,7 @@ func (h *UnifiedWSHandler) sendBalanceUpdate(sender string) {
 
 // sendErrorResponse creates and sends an error response to the client
 func (h *UnifiedWSHandler) sendChannelUpdate(channel Channel) {
-	response := CreateResponse(uint64(time.Now().UnixNano()), "cu", []any{
+	response := CreateResponse(uint64(time.Now().UnixMilli()), "cu", []any{
 		ChannelResponse{
 			ChannelID:   channel.ChannelID,
 			Participant: channel.Participant,
@@ -710,4 +716,15 @@ func HandleAuthVerify(conn *websocket.Conn, rpc *RPCMessage, authManager *AuthMa
 	}
 
 	return addr, nil
+}
+
+func ValidateTimestamp(ts uint64, expirySeconds int) error {
+	if ts < 1_000_000_000_000 || ts > 9_999_999_999_999 {
+		return fmt.Errorf("invalid timestamp %d: must be 13-digit Unix ms", ts)
+	}
+	t := time.UnixMilli(int64(ts)).UTC()
+	if time.Since(t) > time.Duration(expirySeconds)*time.Second {
+		return fmt.Errorf("timestamp expired: %s older than %d s", t.Format(time.RFC3339Nano), expirySeconds)
+	}
+	return nil
 }

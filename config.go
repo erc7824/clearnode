@@ -3,6 +3,7 @@ package main
 import (
 	"log"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/ilyakaznacheev/cleanenv"
@@ -33,6 +34,7 @@ type Config struct {
 	networks      map[string]*NetworkConfig
 	privateKeyHex string
 	dbConf        DatabaseConfig
+	msgExpiryTime int // Time in seconds for message timestamp validation
 }
 
 // LoadConfig builds configuration from environment variables
@@ -69,10 +71,21 @@ func LoadConfig() (*Config, error) {
 		log.Println("BROKER_PRIVATE_KEY environment variable is required")
 	}
 
+	messageTimestampExpiry := 60
+	if messageExpiry := os.Getenv("MSG_EXPIRY_TIME"); messageExpiry != "" {
+		if parsed, err := strconv.Atoi(messageExpiry); err == nil && parsed > 0 {
+			messageTimestampExpiry = parsed
+		} else {
+			log.Println("Invalid MSG_EXPIRY_TIME, using default value")
+		}
+	}
+	log.Printf("Using %d seconds message expiry time", messageTimestampExpiry)
+
 	config := Config{
 		networks:      make(map[string]*NetworkConfig),
 		privateKeyHex: privateKeyHex,
 		dbConf:        dbConf,
+		msgExpiryTime: messageTimestampExpiry,
 	}
 
 	// Process each network
