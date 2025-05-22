@@ -149,16 +149,18 @@ func getOrCreatePrivateKey(keyPath string) (*ecdsa.PrivateKey, error) {
 
 // Client handles websocket connection and RPC messaging
 type Client struct {
-	conn      *websocket.Conn
-	signers   []*Signer
-	address   string
-	addresses []string
+	conn         *websocket.Conn
+	signers      []*Signer
+	address      string // Primary address (for backward compatibility)
+	addresses    []string
+	authSigner   *Signer // Signer used for authentication
+	noSignatures bool    // Flag to indicate if signatures should be added
 }
 
 // NewClient creates a new websocket client
-func NewClient(serverURL string, signers ...*Signer) (*Client, error) {
-	if len(signers) == 0 {
-		return nil, fmt.Errorf("at least one signer is required")
+func NewClient(serverURL string, authSigner *Signer, noSignatures bool, signers ...*Signer) (*Client, error) {
+	if len(signers) == 0 && !noSignatures {
+		return nil, fmt.Errorf("at least one signer is required unless noSignatures is enabled")
 	}
 
 	u, err := url.Parse(serverURL)
@@ -171,20 +173,36 @@ func NewClient(serverURL string, signers ...*Signer) (*Client, error) {
 		return nil, fmt.Errorf("failed to connect to server: %w", err)
 	}
 
-	// We'll use the first signer's address as the primary address
-	primaryAddress := signers[0].GetAddress()
+	var primaryAddress string
+	var addresses []string
 
-	// Collect all addresses
-	addresses := make([]string, len(signers))
-	for i, signer := range signers {
-		addresses[i] = signer.GetAddress()
+	if len(signers) > 0 {
+		// Set auth signer if not specified
+		if authSigner == nil {
+			authSigner = signers[0]
+		}
+
+		// We'll use the auth signer's address as the primary address for auth
+		primaryAddress = authSigner.GetAddress()
+
+		// Collect all addresses
+		addresses = make([]string, len(signers))
+		for i, signer := range signers {
+			addresses[i] = signer.GetAddress()
+		}
+	} else if authSigner != nil {
+		// If we have no signers but have auth signer, use its address
+		primaryAddress = authSigner.GetAddress()
+		addresses = []string{primaryAddress}
 	}
 
 	return &Client{
-		conn:      conn,
-		signers:   signers,
-		address:   primaryAddress, // Keep for backward compatibility
-		addresses: addresses,
+		conn:         conn,
+		signers:      signers,
+		address:      primaryAddress,
+		addresses:    addresses,
+		authSigner:   authSigner,
+		noSignatures: noSignatures,
 	}, nil
 }
 
@@ -206,6 +224,11 @@ func (c *Client) SendMessage(rpcMsg RPCMessage) error {
 
 // collectSignatures gathers signatures from all signers for the given data
 func (c *Client) collectSignatures(data []byte) ([]string, error) {
+	// If noSignatures flag is set, return empty signature array
+	if c.noSignatures {
+		return []string{}, nil
+	}
+
 	signatures := make([]string, len(c.signers))
 
 	for i, signer := range c.signers {
@@ -223,6 +246,11 @@ func (c *Client) collectSignatures(data []byte) ([]string, error) {
 func (c *Client) Authenticate() error {
 	fmt.Println("Starting authentication...")
 
+	// If no auth signer is provided, we can't authenticate
+	if c.authSigner == nil {
+		return fmt.Errorf("no authentication signer provided")
+	}
+
 	// Step 1: Auth request
 	authReq := RPCMessage{
 		Req: &RPCData{
@@ -234,17 +262,18 @@ func (c *Client) Authenticate() error {
 		Sig: []string{},
 	}
 
-	// Sign the request with all signers
+	// Sign the request with auth signer
 	reqData, err := json.Marshal(authReq.Req)
 	if err != nil {
 		return fmt.Errorf("failed to marshal auth request: %w", err)
 	}
 
-	signatures, err := c.collectSignatures(reqData)
+	// For authentication, we always need a signature regardless of noSignatures setting
+	signature, err := c.authSigner.Sign(reqData)
 	if err != nil {
 		return fmt.Errorf("failed to sign auth request: %w", err)
 	}
-	authReq.Sig = signatures
+	authReq.Sig = []string{hexutil.Encode(signature)}
 
 	// Send auth request
 	if err := c.SendMessage(authReq); err != nil {
@@ -299,17 +328,18 @@ func (c *Client) Authenticate() error {
 		Sig: []string{},
 	}
 
-	// Sign the verify request with all signers
+	// Sign the verify request with auth signer
 	verifyData, err := json.Marshal(verifyReq.Req)
 	if err != nil {
 		return fmt.Errorf("failed to marshal verify request: %w", err)
 	}
 
-	verifySignatures, err := c.collectSignatures(verifyData)
+	// For authentication, we always need a signature regardless of noSignatures setting
+	verifySignature, err := c.authSigner.Sign(verifyData)
 	if err != nil {
 		return fmt.Errorf("failed to sign verify request: %w", err)
 	}
-	verifyReq.Sig = verifySignatures
+	verifyReq.Sig = []string{hexutil.Encode(verifySignature)}
 
 	// Send verify request
 	if err := c.SendMessage(verifyReq); err != nil {
@@ -369,6 +399,8 @@ func main() {
 		serverFlag  = flag.String("server", "ws://localhost:8000/ws", "WebSocket server URL")
 		genKeyFlag  = flag.String("genkey", "", "Generate a new key and exit. Use a signer number (e.g., '1', '2', '3').")
 		signersFlag = flag.String("signers", "", "Comma-separated list of signer numbers to use (e.g., '1,2,3'). If not specified, all available signers will be used.")
+		authFlag    = flag.String("auth", "", "Specify which signer to authenticate with (e.g., '1'). If not specified, first signer is used.")
+		noSignFlag  = flag.Bool("nosign", false, "Send request without signatures")
 	)
 
 	flag.Parse()
@@ -542,42 +574,133 @@ func main() {
 		log.Fatalf("Error marshaling RPC data: %v", err)
 	}
 
-	// Create a temporary client to collect signatures
-	tempClient := &Client{
-		signers: signers,
+	// Initialize signatures with an empty array (not null)
+	signatures := []string{}
+
+	// Only collect signatures if nosign flag is not set
+	if !*noSignFlag {
+		// Create a temporary client to collect signatures
+		tempClient := &Client{
+			signers: signers,
+		}
+
+		// Collect signatures from all signers
+		var err error
+		signatures, err = tempClient.collectSignatures(dataBytes)
+		if err != nil {
+			log.Fatalf("Error signing data: %v", err)
+		}
 	}
 
-	// Collect signatures from all signers
-	signatures, err := tempClient.collectSignatures(dataBytes)
-	if err != nil {
-		log.Fatalf("Error signing data: %v", err)
-	}
-
-	// Create final RPC message with all signatures
+	// Create final RPC message with signatures (or empty array if nosign is set)
 	rpcMessage := RPCMessage{
 		Req: &rpcData,
 		Sig: signatures,
 	}
 
-	// Output the final message
+	// Validate auth signer if specified, even if not sending
+	var authSigner *Signer
+	if *authFlag != "" {
+		var authNum int
+		if _, err := fmt.Sscanf(*authFlag, "%d", &authNum); err != nil {
+			log.Fatalf("Error parsing auth signer number '%s': %v", *authFlag, err)
+		}
+
+		if signer, ok := signerMapping[authNum]; ok {
+			authSigner = signer
+			fmt.Printf("Using signer #%d for authentication: %s\n", authNum, signer.GetAddress())
+		} else {
+			log.Fatalf("Auth signer #%d not found", authNum)
+		}
+	} else if len(signers) > 0 {
+		// Default to first signer if not specified
+		authSigner = signers[0]
+
+		// Find the signer number for display
+		var signerNum int
+		for num, s := range signerMapping {
+			if s == authSigner {
+				signerNum = num
+				break
+			}
+		}
+		if *sendFlag {
+			fmt.Printf("Using signer #%d for authentication: %s\n", signerNum, authSigner.GetAddress())
+		}
+	}
+
+	fmt.Println("\nPayload:")
+
+	// Format the output differently based on whether we're sending
 	output, err := json.MarshalIndent(rpcMessage, "", "  ")
 	if err != nil {
 		log.Fatalf("Error marshaling final message: %v", err)
 	}
 
+	// Always show the JSON payload
 	fmt.Println(string(output))
+
+	// For non-send mode, also show the detailed plan
+	if !*sendFlag {
+		fmt.Println("\nDescription:")
+
+		// Parameters
+		if len(rpcData.Params) > 0 {
+			paramsJSON, _ := json.MarshalIndent(rpcData.Params, "", "  ")
+			fmt.Println("\nParameters:")
+			fmt.Println(string(paramsJSON))
+		} else {
+			fmt.Println("\nParameters: []")
+		}
+
+		// Signature info
+		signerAddresses := []string{}
+		for _, s := range signers {
+			signerAddresses = append(signerAddresses, s.GetAddress())
+		}
+
+		if *noSignFlag {
+			fmt.Println("\nSignatures: No signatures will be included (--nosign flag)")
+		} else if len(signatures) == 0 {
+			fmt.Println("\nSignatures: Empty signature array")
+		} else {
+			fmt.Printf("\nSignatures: Message will be signed by %d signers\n", len(signatures))
+			for i, addr := range signerAddresses {
+				fmt.Printf("  - Signer #%d: %s\n", i+1, addr)
+			}
+		}
+
+		// Auth signer info
+		if authSigner != nil {
+			fmt.Printf("\nAuthentication: Using %s for authentication\n", authSigner.GetAddress())
+		} else if *noSignFlag {
+			fmt.Println("\nAuthentication: None (--nosign flag)")
+		}
+
+		// Server info
+		fmt.Printf("\nTarget server: %s\n", *serverFlag)
+		fmt.Println("\nTo execute this plan, run with the --send flag")
+		fmt.Println()
+	}
 
 	// If send flag is set, send the message to the server
 	if *sendFlag {
-		client, err := NewClient(*serverFlag, signers...)
+
+		// Create the client with the specified settings
+		client, err := NewClient(*serverFlag, authSigner, *noSignFlag, signers...)
 		if err != nil {
 			log.Fatalf("Error creating client: %v", err)
 		}
 		defer client.Close()
 
-		// Authenticate with the server
-		if err := client.Authenticate(); err != nil {
-			log.Fatalf("Authentication failed: %v", err)
+		// Skip authentication if noSign flag is set and no auth signer is provided
+		if authSigner == nil && *noSignFlag {
+			fmt.Println("Skipping authentication as no auth signer is provided and nosign flag is set")
+		} else {
+			// Authenticate with the server
+			if err := client.Authenticate(); err != nil {
+				log.Fatalf("Authentication failed: %v", err)
+			}
 		}
 
 		// Send the message

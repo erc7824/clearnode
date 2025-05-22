@@ -71,7 +71,7 @@ The client supports using multiple signers for request signing:
   go run . --method ping --signers 2,4 --send
   ```
 - Signatures are collected in the `sig` field of the RPC message
-- The first signer in the list is used as the address for authentication
+- By default, the first signer in the list is used as the address for authentication, but you can specify a different signer with the `--auth` flag
 
 ### Using Your Key with MetaMask
 
@@ -102,8 +102,23 @@ go run . --method <method_name> [options]
 | `--server` | WebSocket server URL | ws://localhost:8000/ws |
 | `--genkey` | Generate a new key and exit. Use a signer number (e.g., '1', '2', '3') | "" |
 | `--signers` | Comma-separated list of signer numbers to use (e.g., "1,2,3") | All available |
+| `--auth` | Specify which signer to authenticate with (e.g., "1") | First signer |
+| `--nosign` | Make a request without signatures | false |
 
 ## Common Test Scenarios
+
+### Authentication & Signature Options
+
+```bash
+# Authenticate with a specific signer
+go run . --method ping --send --auth 2
+
+# Send a request with no signatures (useful for public endpoints or testing)
+go run . --method ping --send --nosign
+
+# Authenticate with signer #2 but sign the message with signers #1 and #3
+go run . --method ping --send --auth 2 --signers 1,3
+```
 
 ### Server Health & Configuration
 
@@ -219,3 +234,5 @@ The `test_api.sh` script provides a menu-driven interface for common operations:
 - The testing tools automatically handle the entire authentication flow
 - Multi-signature support allows testing scenarios where messages must be signed by multiple parties
 - The `sig` field in RPC messages contains an array of signatures from all signers
+- The `--nosign` flag allows sending requests without signatures, useful for testing public endpoints or middleware
+- The `--auth` flag lets you specify which signer to use for authentication when using multiple signers
