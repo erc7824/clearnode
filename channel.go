@@ -76,17 +76,22 @@ func GetChannelByID(tx *gorm.DB, channelID string) (*Channel, error) {
 	return &channel, nil
 }
 
-// getChannelsForParticipant finds all channels for a participant
-func getChannelsForParticipant(tx *gorm.DB, participant string) ([]Channel, error) {
+// getChannelsByParticipant finds all channels for a participant
+func getChannelsByParticipant(tx *gorm.DB, participant string, status string) ([]Channel, error) {
 	var channels []Channel
-	if err := tx.Where("participant = ?",
-		participant).Order("created_at DESC").Find(&channels).Error; err != nil {
+	q := tx.Where("participant = ?", participant)
+	if status != "" {
+		q = q.Where("status = ?", status)
+	}
+
+	if err := q.Order("created_at DESC").Find(&channels).Error; err != nil {
 		return nil, fmt.Errorf("error finding channels for participant %s: %w", participant, err)
 	}
+
 	return channels, nil
 }
 
-// CheckExistingChannels checks if there is an existing open channel on the same network between participant A and B
+// CheckExistingChannels checks if there is an existing open channel on the same network between participant and broker
 func CheckExistingChannels(tx *gorm.DB, participantA, token string, chainID uint32) (*Channel, error) {
 	var channel Channel
 	err := tx.Where("participant = ? AND token = ? AND chain_id = ? AND status = ?", participantA, token, chainID, ChannelStatusOpen).

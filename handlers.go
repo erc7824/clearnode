@@ -872,6 +872,7 @@ func HandleCloseChannel(rpc *RPCMessage, db *gorm.DB, signer *Signer) (*RPCMessa
 // TODO: add filters, pagination, etc.
 func HandleGetChannels(rpc *RPCMessage, db *gorm.DB) (*RPCMessage, error) {
 	var participant string
+	var status string
 
 	if len(rpc.Req.Params) > 0 {
 		paramsJSON, err := json.Marshal(rpc.Req.Params[0])
@@ -879,6 +880,7 @@ func HandleGetChannels(rpc *RPCMessage, db *gorm.DB) (*RPCMessage, error) {
 			var params map[string]string
 			if err := json.Unmarshal(paramsJSON, &params); err == nil {
 				participant = params["participant"]
+				status = params["status"]
 			}
 		}
 	}
@@ -887,7 +889,7 @@ func HandleGetChannels(rpc *RPCMessage, db *gorm.DB) (*RPCMessage, error) {
 		return nil, errors.New("missing participant parameter")
 	}
 
-	channels, err := getChannelsForParticipant(db, participant)
+	channels, err := getChannelsByParticipant(db, participant, status)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get channels: %w", err)
 	}

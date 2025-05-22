@@ -605,6 +605,108 @@ func TestHandleGetChannels(t *testing.T) {
 		assert.NotEmpty(t, ch.UpdatedAt, "UpdatedAt should not be empty")
 	}
 
+	// Test with status filter for "open" channels
+	openStatusParams := map[string]string{
+		"participant": participantAddr,
+		"status":      string(ChannelStatusOpen),
+	}
+	openStatusParamsJSON, err := json.Marshal(openStatusParams)
+	require.NoError(t, err)
+
+	openStatusRequest := &RPCMessage{
+		Req: &RPCData{
+			RequestID: 456,
+			Method:    "get_channels",
+			Params:    []any{json.RawMessage(openStatusParamsJSON)},
+			Timestamp: uint64(time.Now().Unix()),
+		},
+	}
+
+	reqBytes, err = json.Marshal(openStatusRequest.Req)
+	require.NoError(t, err)
+	signed, err = signer.Sign(reqBytes)
+	require.NoError(t, err)
+	openStatusRequest.Sig = []string{hexutil.Encode(signed)}
+
+	openStatusResponse, err := HandleGetChannels(openStatusRequest, db)
+	require.NoError(t, err)
+	require.NotNil(t, openStatusResponse)
+
+	// Extract and verify filtered channels
+	openChannels, ok := openStatusResponse.Res.Params[0].([]ChannelResponse)
+	require.True(t, ok, "Response parameter should be a slice of ChannelResponse")
+	assert.Len(t, openChannels, 1, "Should return only 1 open channel")
+	assert.Equal(t, "0xChannel1", openChannels[0].ChannelID, "Should return the open channel")
+	assert.Equal(t, ChannelStatusOpen, openChannels[0].Status, "Status should be open")
+
+	// Test with status filter for "closed" channels
+	closedStatusParams := map[string]string{
+		"participant": participantAddr,
+		"status":      string(ChannelStatusClosed),
+	}
+	closedStatusParamsJSON, err := json.Marshal(closedStatusParams)
+	require.NoError(t, err)
+
+	closedStatusRequest := &RPCMessage{
+		Req: &RPCData{
+			RequestID: 457,
+			Method:    "get_channels",
+			Params:    []any{json.RawMessage(closedStatusParamsJSON)},
+			Timestamp: uint64(time.Now().Unix()),
+		},
+	}
+
+	reqBytes, err = json.Marshal(closedStatusRequest.Req)
+	require.NoError(t, err)
+	signed, err = signer.Sign(reqBytes)
+	require.NoError(t, err)
+	closedStatusRequest.Sig = []string{hexutil.Encode(signed)}
+
+	closedStatusResponse, err := HandleGetChannels(closedStatusRequest, db)
+	require.NoError(t, err)
+	require.NotNil(t, closedStatusResponse)
+
+	// Extract and verify filtered channels
+	closedChannels, ok := closedStatusResponse.Res.Params[0].([]ChannelResponse)
+	require.True(t, ok, "Response parameter should be a slice of ChannelResponse")
+	assert.Len(t, closedChannels, 1, "Should return only 1 closed channel")
+	assert.Equal(t, "0xChannel2", closedChannels[0].ChannelID, "Should return the closed channel")
+	assert.Equal(t, ChannelStatusClosed, closedChannels[0].Status, "Status should be closed")
+
+	// Test with status filter for "joining" channels
+	joiningStatusParams := map[string]string{
+		"participant": participantAddr,
+		"status":      string(ChannelStatusJoining),
+	}
+	joiningStatusParamsJSON, err := json.Marshal(joiningStatusParams)
+	require.NoError(t, err)
+
+	joiningStatusRequest := &RPCMessage{
+		Req: &RPCData{
+			RequestID: 458,
+			Method:    "get_channels",
+			Params:    []any{json.RawMessage(joiningStatusParamsJSON)},
+			Timestamp: uint64(time.Now().Unix()),
+		},
+	}
+
+	reqBytes, err = json.Marshal(joiningStatusRequest.Req)
+	require.NoError(t, err)
+	signed, err = signer.Sign(reqBytes)
+	require.NoError(t, err)
+	joiningStatusRequest.Sig = []string{hexutil.Encode(signed)}
+
+	joiningStatusResponse, err := HandleGetChannels(joiningStatusRequest, db)
+	require.NoError(t, err)
+	require.NotNil(t, joiningStatusResponse)
+
+	// Extract and verify filtered channels
+	joiningChannels, ok := joiningStatusResponse.Res.Params[0].([]ChannelResponse)
+	require.True(t, ok, "Response parameter should be a slice of ChannelResponse")
+	assert.Len(t, joiningChannels, 1, "Should return only 1 joining channel")
+	assert.Equal(t, "0xChannel3", joiningChannels[0].ChannelID, "Should return the joining channel")
+	assert.Equal(t, ChannelStatusJoining, joiningChannels[0].Status, "Status should be joining")
+
 	// Test with missing participant parameter
 	missingParamReq := &RPCMessage{
 		Req: &RPCData{

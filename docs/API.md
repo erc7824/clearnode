@@ -591,15 +591,54 @@ Balance updates are sent as unsolicited server messages with the "bu" method:
 
 The balance update provides the latest balances for all assets in the participant's unified ledger, allowing clients to maintain an up-to-date view of available funds without explicitly requesting them.
 
+### Open Channels
+
+The server automatically sends all open channels as a batch update to clients after successful authentication.
+
+```json
+{
+  "res": [1234567890123, "channels", [[
+    {
+      "channel_id": "0xfedcba9876543210...",
+      "participant": "0x1234567890abcdef...",
+      "status": "open",
+      "token": "0xeeee567890abcdef...",
+      "amount": "100000",
+      "chain_id": 137,
+      "adjudicator": "0xAdjudicatorContractAddress...",
+      "challenge": 86400,
+      "nonce": 1,
+      "version": 2,
+      "created_at": "2023-05-01T12:00:00Z",
+      "updated_at": "2023-05-01T12:30:00Z"
+    },
+    {
+      "channel_id": "0xabcdef1234567890...",
+      "participant": "0x1234567890abcdef...",
+      "status": "open",
+      "token": "0xeeee567890abcdef...",
+      "amount": "50000",
+      "chain_id": 42220,
+      "adjudicator": "0xAdjudicatorContractAddress...",
+      "challenge": 86400,
+      "nonce": 1,
+      "version": 3,
+      "created_at": "2023-04-15T10:00:00Z",
+      "updated_at": "2023-04-20T14:30:00Z"
+    }
+  ]], 1619123456789],
+  "sig": ["0xabcd1234..."]
+}
+```
+
 ### Channel Updates
 
-The server automatically sends channel updates to clients in these scenarios:
-1. After successful authentication (for all existing channels)
-2. When a channel is created
-3. When a channel's status changes (open, joined, closed)
-4. When a channel is resized
+For channel updates, the server sends them in these scenarios:
+1. When a channel is created
+2. When a channel's status changes (open, joined, closed)
+3. When a channel is resized
 
-Channel updates are sent as unsolicited server messages with the "cu" method:
+Individual channel updates are sent as unsolicited server messages with the "cu" method:
 
 ```json
 {
