@@ -917,6 +917,158 @@ func TestHandleGetAssets(t *testing.T) {
 	assert.Len(t, assets4, 0, "Should return 0 assets for non-existent chain_id")
 }
 
+// TestHandleGetAppSessions tests the get app sessions handler functionality
+func TestHandleGetAppSessions(t *testing.T) {
+	rawKey, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	signer := Signer{privateKey: rawKey}
+	participantAddr := signer.GetAddress().Hex()
+
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	// Create some test app sessions
+	sessions := []AppSession{
+		{
+			SessionID:    "0xSession1",
+			Participants: []string{participantAddr, "0xParticipant2"},
+			Status:       ChannelStatusOpen,
+			Protocol:     "test-app-1",
+			Challenge:    60,
+			Weights:      []int64{50, 50},
+			Quorum:       75,
+			Nonce:        1,
+			Version:      1,
+		},
+		{
+			SessionID:    "0xSession2",
+			Participants: []string{participantAddr, "0xParticipant3"},
+			Status:       ChannelStatusClosed,
+			Protocol:     "test-app-2",
+			Challenge:    120,
+			Weights:      []int64{30, 70},
+			Quorum:       80,
+			Nonce:        2,
+			Version:      2,
+		},
+		{
+			SessionID:    "0xSession3",
+			Participants: []string{"0xParticipant4", "0xParticipant5"},
+			Status:       ChannelStatusOpen,
+			Protocol:     "test-app-3",
+			Challenge:    90,
+			Weights:      []int64{40, 60},
+			Quorum:       60,
+			Nonce:        3,
+			Version:      3,
+		},
+	}
+
+	for _, session := range sessions {
+		require.NoError(t, db.Create(&session).Error)
+	}
+
+	// Test Case 1: Get all app sessions for the participant
+	params1 := map[string]string{
+		"participant": participantAddr,
+	}
+	paramsJSON1, err := json.Marshal(params1)
+	require.NoError(t, err)
+
+	rpcRequest1 := &RPCMessage{
+		Req: &RPCData{
+			RequestID: 1,
+			Method:    "get_app_sessions",
+			Params:    []any{json.RawMessage(paramsJSON1)},
+			Timestamp: uint64(time.Now().Unix()),
+		},
+		Sig: []string{"dummy-signature"},
+	}
+
+	// Call the handler
+	resp1, err := HandleGetAppSessions(rpcRequest1, db)
+	require.NoError(t, err)
+	assert.NotNil(t, resp1)
+
+	// Verify response format
+	assert.Equal(t, "get_app_sessions", resp1.Res.Method)
+	assert.Equal(t, uint64(1), resp1.Res.RequestID)
+	require.Len(t, resp1.Res.Params, 1, "Response should contain an array of AppSessionResponse objects")
+
+	// Extract and verify app sessions
+	sessionResponses, ok := resp1.Res.Params[0].([]AppSessionResponse)
+	require.True(t, ok, "Response parameter should be a slice of AppSessionResponse")
+	assert.Len(t, sessionResponses, 2, "Should return 2 app sessions for the participant")
+
+	// Verify the response contains the expected app sessions
+	foundSessions := make(map[string]bool)
+	for _, session := range sessionResponses {
+		foundSessions[session.AppSessionID] = true
+
+		// Find the original session to compare with
+		var originalSession AppSession
+		for _, s := range sessions {
+			if s.SessionID == session.AppSessionID {
+				originalSession = s
+				break
+			}
+		}
+
+		assert.Equal(t, string(originalSession.Status), session.Status, "Status should match")
+	}
+
+	assert.True(t, foundSessions["0xSession1"], "Should include Session1")
+	assert.True(t, foundSessions["0xSession2"], "Should include Session2")
+	assert.False(t, foundSessions["0xSession3"], "Should not include Session3")
+
+	// Test Case 2: Get open app sessions for the participant
+	params2 := map[string]string{
+		"participant": participantAddr,
+		"status":      string(ChannelStatusOpen),
+	}
+	paramsJSON2, err := json.Marshal(params2)
+	require.NoError(t, err)
+
+	rpcRequest2 := &RPCMessage{
+		Req: &RPCData{
+			RequestID: 2,
+			Method:    "get_app_sessions",
+			Params:    []any{json.RawMessage(paramsJSON2)},
+			Timestamp: uint64(time.Now().Unix()),
+		},
+		Sig: []string{"dummy-signature"},
+	}
+
+	// Call the handler
+	resp2, err := HandleGetAppSessions(rpcRequest2, db)
+	require.NoError(t, err)
+	assert.NotNil(t, resp2)
+
+	// Extract and verify filtered app sessions
+	sessionResponses2, ok := resp2.Res.Params[0].([]AppSessionResponse)
+	require.True(t, ok, "Response parameter should be a slice of AppSessionResponse")
+	assert.Len(t, sessionResponses2, 1, "Should return 1 open app session for the participant")
+	assert.Equal(t, "0xSession1", sessionResponses2[0].AppSessionID, "Should be Session1")
+	assert.Equal(t, string(ChannelStatusOpen), sessionResponses2[0].Status, "Status should be open")
+
+	// Test Case 3: Error case - missing participant
+	rpcRequest3 := &RPCMessage{
+		Req: &RPCData{
+			RequestID: 3,
+			Method:    "get_app_sessions",
+			Params:    []any{json.RawMessage(`{}`)},
+			Timestamp: uint64(time.Now().Unix()),
+		},
+		Sig: []string{"dummy-signature"},
+	}
+
+	// Call with missing participant
+	resp3, err := HandleGetAppSessions(rpcRequest3, db)
+	assert.Error(t, err, "Should return error with missing participant")
+	assert.Nil(t, resp3)
+	assert.Contains(t, err.Error(), "missing participant", "Error should mention missing participant")
+}
+
 func TestHandleGetRPCHistory(t *testing.T) {
 	rawKey, err := crypto.GenerateKey()
 	require.NoError(t, err)

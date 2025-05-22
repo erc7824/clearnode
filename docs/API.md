@@ -11,6 +11,7 @@
 | `get_config` | Retrieves broker configuration and supported networks |
 | `get_assets` | Retrieves all supported assets (optionally filtered by chain_id) |
 | `get_app_definition` | Retrieves application definition for a ledger account |
+| `get_app_sessions` | Lists virtual applications for a participant with optional status filter |
 | `get_ledger_balances` | Lists participants and their balances for a ledger account |
 | `get_ledger_entries` | Retrieves detailed ledger entries for a participant |
 | `get_channels` | Lists all channels for a participant with their status across all chains |
@@ -112,6 +113,60 @@ Retrieves the application definition for a specific ledger account.
       "nonce": 1
     }
   ], 1619123456789],
+  "sig": ["0xabcd1234..."]
+}
+```
+
+### Get App Sessions
+
+Lists all virtual applications for a participant. Optionally, you can filter the results by status (open, closed).
+
+**Request:**
+
+```json
+{
+  "req": [1, "get_app_sessions", [{
+    "participant": "0x1234567890abcdef...",
+    "status": "open"  // Optional: filter by status
+  }], 1619123456789],
+  "sig": ["0x9876fedcba..."]
+}
+```
+
+**Response:**
+
+```json
+{
+  "res": [1, "get_app_sessions", [[
+    {
+      "app_session_id": "0x3456789012abcdef...",
+      "status": "open",
+      "participants": [
+        "0x1234567890abcdef...",
+        "0x00112233445566778899AaBbCcDdEeFf00112233"
+      ],
+      "protocol": "NitroAura",
+      "challenge": 86400,
+      "weights": [50, 50],
+      "quorum": 100,
+      "version": 1,
+      "nonce": 123456789
+    },
+    {
+      "app_session_id": "0x7890123456abcdef...",
+      "status": "open",
+      "participants": [
+        "0x1234567890abcdef...",
+        "0xAaBbCcDdEeFf0011223344556677889900aAbBcC"
+      ],
+      "protocol": "NitroSnake",
+      "challenge": 86400,
+      "weights": [70, 30],
+      "quorum": 100,
+      "version": 1,
+      "nonce": 123456790
+    }
+  ]], 1619123456789],
   "sig": ["0xabcd1234..."]
 }
 ```

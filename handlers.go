@@ -72,8 +72,15 @@ func (r CloseAppSignData) MarshalJSON() ([]byte, error) {
 
 // AppSessionResponse represents response data for application operations
 type AppSessionResponse struct {
-	AppSessionID string `json:"app_session_id"`
-	Status       string `json:"status"`
+	AppSessionID string   `json:"app_session_id"`
+	Status       string   `json:"status"`
+	Participants []string `json:"participants,omitempty"`
+	Protocol     string   `json:"protocol,omitempty"`
+	Challenge    uint64   `json:"challenge,omitempty"`
+	Weights      []int64  `json:"weights,omitempty"`
+	Quorum       uint64   `json:"quorum,omitempty"`
+	Version      uint64   `json:"version,omitempty"`
+	Nonce        uint64   `json:"nonce,omitempty"`
 }
 
 // ResizeChannelParams represents parameters needed for resizing a channel
@@ -610,6 +617,48 @@ func HandleGetAppDefinition(rpc *RPCMessage, db *gorm.DB) (*RPCMessage, error) {
 	}
 
 	rpcResponse := CreateResponse(rpc.Req.RequestID, rpc.Req.Method, []any{appDef}, time.Now())
+	return rpcResponse, nil
+}
+
+func HandleGetAppSessions(rpc *RPCMessage, db *gorm.DB) (*RPCMessage, error) {
+	var participant string
+	var status string
+
+	if len(rpc.Req.Params) > 0 {
+		paramsJSON, err := json.Marshal(rpc.Req.Params[0])
+		if err == nil {
+			var params map[string]string
+			if err := json.Unmarshal(paramsJSON, &params); err == nil {
+				participant = params["participant"]
+				status = params["status"]
+			}
+		}
+	}
+
+	if participant == "" {
+		return nil, errors.New("missing participant")
+	}
+
+	sessions, err := getAppSessionsForParticipant(db, participant, status)
+	if err != nil {
+		return nil, fmt.Errorf("failed to find application sessions: %w", err)
+	}
+	response := make([]AppSessionResponse, len(sessions))
+	for i, session := range sessions {
+		response[i] = AppSessionResponse{
+			AppSessionID: session.SessionID,
+			Status:       string(session.Status),
+			Participants: session.Participants,
+			Protocol:     session.Protocol,
+			Challenge:    session.Challenge,
+			Weights:      session.Weights,
+			Quorum:       session.Quorum,
+			Version:      session.Version,
+			Nonce:        session.Nonce,
+		}
+	}
+
+	rpcResponse := CreateResponse(rpc.Req.RequestID, rpc.Req.Method, []any{response}, time.Now())
 	return rpcResponse, nil
 }
 
