@@ -37,28 +37,51 @@ go run . --method ping --send --server ws://localhost:8000/ws
 
 ### Key Generation and Storage
 
-- The client automatically creates a private key on first run
-- Keys are stored in `signer_key.hex`
-- To generate a new key explicitly:
+- All signers are treated equally in the system
+- Keys are stored as `signer_key_N.hex` files (where N is the signer number)
+- To generate signer keys, use the `--genkey` parameter with a number:
 
 ```bash
-go run . --genkey
+# Generate signer keys
+go run . --genkey 1    # Creates signer_key_1.hex
+go run . --genkey 2    # Creates signer_key_2.hex
+go run . --genkey 3    # Creates signer_key_3.hex
 ```
 
-This will display:
+These commands will display:
 - The file path where the key is stored
 - The Ethereum address associated with the key
 - The private key in hex format (for importing into wallets)
+
+### Multiple Signers Support
+
+The client supports using multiple signers for request signing:
+
+- When running commands, the client automatically detects and uses all signer keys in the current directory
+- Messages will be signed by all available signers by default
+- You can specify which signers to use with the `--signers` flag:
+  ```bash
+  # Use only signer #1
+  go run . --method ping --signers 1 --send
+  
+  # Use signers #1 and #3
+  go run . --method ping --signers 1,3 --send
+  
+  # Use only signers #2 and #4
+  go run . --method ping --signers 2,4 --send
+  ```
+- Signatures are collected in the `sig` field of the RPC message
+- The first signer in the list is used as the address for authentication
 
 ### Using Your Key with MetaMask
 
 To import your testing key into MetaMask:
 
-1. Run `go run . --genkey` to view your current key
+1. Open `signer_key_N.hex` to view your current key
 2. In MetaMask, click Account → Import Account
 3. Select "Private Key" and paste with "0x" prefix: `0x<key-from-output>`
 
-**Security Note**: Use a dedicated key for testing and avoid storing significant funds on it.
+**Security Note**: Use dedicated keys for testing and avoid storing significant funds on them.
 
 ## Command Line Usage
 
@@ -77,7 +100,8 @@ go run . --method <method_name> [options]
 | `--params` | JSON array of parameters | `[]` |
 | `--send` | Send to server (omit to only create signed message) | false |
 | `--server` | WebSocket server URL | ws://localhost:8000/ws |
-| `--genkey` | Generate a new private key and exit | false |
+| `--genkey` | Generate a new key and exit. Use a signer number (e.g., '1', '2', '3') | "" |
+| `--signers` | Comma-separated list of signer numbers to use (e.g., "1,2,3") | All available |
 
 ## Common Test Scenarios
 
@@ -193,3 +217,5 @@ The `test_api.sh` script provides a menu-driven interface for common operations:
 - Messages are signed using ECDSA with the Ethereum secp256k1 curve
 - Authentication follows the challenge-response pattern required by Clearnode
 - The testing tools automatically handle the entire authentication flow
+- Multi-signature support allows testing scenarios where messages must be signed by multiple parties
+- The `sig` field in RPC messages contains an array of signatures from all signers

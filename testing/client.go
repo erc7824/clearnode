@@ -11,16 +11,13 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/erc7824/go-nitrolite"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/gorilla/websocket"
-)
-
-const (
-	keyFileName = "signer_key.hex"
 )
 
 // Signer handles signing operations using a private key
@@ -152,13 +149,18 @@ func getOrCreatePrivateKey(keyPath string) (*ecdsa.PrivateKey, error) {
 
 // Client handles websocket connection and RPC messaging
 type Client struct {
-	conn    *websocket.Conn
-	signer  *Signer
-	address string
+	conn      *websocket.Conn
+	signers   []*Signer
+	address   string
+	addresses []string
 }
 
 // NewClient creates a new websocket client
-func NewClient(serverURL string, signer *Signer) (*Client, error) {
+func NewClient(serverURL string, signers ...*Signer) (*Client, error) {
+	if len(signers) == 0 {
+		return nil, fmt.Errorf("at least one signer is required")
+	}
+
 	u, err := url.Parse(serverURL)
 	if err != nil {
 		return nil, fmt.Errorf("invalid server URL: %w", err)
@@ -169,10 +171,20 @@ func NewClient(serverURL string, signer *Signer) (*Client, error) {
 		return nil, fmt.Errorf("failed to connect to server: %w", err)
 	}
 
+	// We'll use the first signer's address as the primary address
+	primaryAddress := signers[0].GetAddress()
+
+	// Collect all addresses
+	addresses := make([]string, len(signers))
+	for i, signer := range signers {
+		addresses[i] = signer.GetAddress()
+	}
+
 	return &Client{
-		conn:    conn,
-		signer:  signer,
-		address: signer.GetAddress(),
+		conn:      conn,
+		signers:   signers,
+		address:   primaryAddress, // Keep for backward compatibility
+		addresses: addresses,
 	}, nil
 }
 
@@ -192,6 +204,21 @@ func (c *Client) SendMessage(rpcMsg RPCMessage) error {
 	return nil
 }
 
+// collectSignatures gathers signatures from all signers for the given data
+func (c *Client) collectSignatures(data []byte) ([]string, error) {
+	signatures := make([]string, len(c.signers))
+
+	for i, signer := range c.signers {
+		signature, err := signer.Sign(data)
+		if err != nil {
+			return nil, fmt.Errorf("failed to sign with signer %d: %w", i, err)
+		}
+		signatures[i] = hexutil.Encode(signature)
+	}
+
+	return signatures, nil
+}
+
 // Authenticate performs the authentication flow with the server
 func (c *Client) Authenticate() error {
 	fmt.Println("Starting authentication...")
@@ -207,17 +234,17 @@ func (c *Client) Authenticate() error {
 		Sig: []string{},
 	}
 
-	// Sign the request
+	// Sign the request with all signers
 	reqData, err := json.Marshal(authReq.Req)
 	if err != nil {
 		return fmt.Errorf("failed to marshal auth request: %w", err)
 	}
 
-	signature, err := c.signer.Sign(reqData)
+	signatures, err := c.collectSignatures(reqData)
 	if err != nil {
 		return fmt.Errorf("failed to sign auth request: %w", err)
 	}
-	authReq.Sig = []string{hexutil.Encode(signature)}
+	authReq.Sig = signatures
 
 	// Send auth request
 	if err := c.SendMessage(authReq); err != nil {
@@ -272,17 +299,17 @@ func (c *Client) Authenticate() error {
 		Sig: []string{},
 	}
 
-	// Sign the verify request
+	// Sign the verify request with all signers
 	verifyData, err := json.Marshal(verifyReq.Req)
 	if err != nil {
 		return fmt.Errorf("failed to marshal verify request: %w", err)
 	}
 
-	verifySignature, err := c.signer.Sign(verifyData)
+	verifySignatures, err := c.collectSignatures(verifyData)
 	if err != nil {
 		return fmt.Errorf("failed to sign verify request: %w", err)
 	}
-	verifyReq.Sig = []string{hexutil.Encode(verifySignature)}
+	verifyReq.Sig = verifySignatures
 
 	// Send verify request
 	if err := c.SendMessage(verifyReq); err != nil {
@@ -335,23 +362,41 @@ func (c *Client) Close() {
 func main() {
 	// Define flags
 	var (
-		methodFlag = flag.String("method", "", "RPC method name")
-		idFlag     = flag.Uint64("id", 1, "Request ID")
-		paramsFlag = flag.String("params", "[]", "JSON array of parameters")
-		sendFlag   = flag.Bool("send", false, "Send the message to the server")
-		serverFlag = flag.String("server", "ws://localhost:8000/ws", "WebSocket server URL")
-		genKeyFlag = flag.Bool("genkey", false, "Generate a new private key and exit")
+		methodFlag  = flag.String("method", "", "RPC method name")
+		idFlag      = flag.Uint64("id", 1, "Request ID")
+		paramsFlag  = flag.String("params", "[]", "JSON array of parameters")
+		sendFlag    = flag.Bool("send", false, "Send the message to the server")
+		serverFlag  = flag.String("server", "ws://localhost:8000/ws", "WebSocket server URL")
+		genKeyFlag  = flag.String("genkey", "", "Generate a new key and exit. Use a signer number (e.g., '1', '2', '3').")
+		signersFlag = flag.String("signers", "", "Comma-separated list of signer numbers to use (e.g., '1,2,3'). If not specified, all available signers will be used.")
 	)
 
 	flag.Parse()
 
-	// If genkey flag is set, generate a private key and exit
-	if *genKeyFlag {
-		currentDir, err := os.Getwd()
-		if err != nil {
-			log.Fatalf("Error getting current directory: %v", err)
+	// Get current directory for key storage
+	currentDir, err := os.Getwd()
+	if err != nil {
+		log.Fatalf("Error getting current directory: %v", err)
+	}
+
+	// If genkey flag is set, generate a key and exit
+	if *genKeyFlag != "" {
+		var keyPath string
+		var keyType string
+
+		// Try to parse as a signer number
+		var signerNum int
+		if _, err := fmt.Sscanf(*genKeyFlag, "%d", &signerNum); err != nil {
+			log.Fatalf("Invalid genkey value. Use a signer number (e.g., '1', '2', '3'): %v", err)
 		}
-		keyPath := filepath.Join(currentDir, keyFileName)
+
+		if signerNum < 1 {
+			log.Fatalf("Signer number must be at least 1")
+		}
+
+		// Generate signer key
+		keyPath = filepath.Join(currentDir, fmt.Sprintf("signer_key_%d.hex", signerNum))
+		keyType = fmt.Sprintf("signer #%d", signerNum)
 
 		// Generate new key
 		key, err := generatePrivateKey()
@@ -370,7 +415,7 @@ func main() {
 			log.Fatalf("Error creating signer: %v", err)
 		}
 
-		fmt.Printf("Generated new private key at: %s\n", keyPath)
+		fmt.Printf("Generated new %s key at: %s\n", keyType, keyPath)
 		fmt.Printf("Ethereum Address: %s\n", signer.GetAddress())
 
 		// Read and display the key for convenience
@@ -396,26 +441,92 @@ func main() {
 		log.Fatalf("Error parsing params JSON: %v", err)
 	}
 
-	// Get or create private key
-	// Use the current directory to store the key file
-	currentDir, err := os.Getwd()
+	// Look for all signer keys in the directory
+	files, err := os.ReadDir(currentDir)
 	if err != nil {
-		log.Fatalf("Error getting current directory: %v", err)
-	}
-	keyPath := filepath.Join(currentDir, keyFileName)
-	privateKey, err := getOrCreatePrivateKey(keyPath)
-	if err != nil {
-		log.Fatalf("Error with private key: %v", err)
+		log.Fatalf("Error reading directory: %v", err)
 	}
 
-	// Create signer
-	signer, err := NewSigner(hexutil.Encode(crypto.FromECDSA(privateKey)))
-	if err != nil {
-		log.Fatalf("Error creating signer: %v", err)
+	// Load all available signers
+	allSigners := make([]*Signer, 0)
+	signerMapping := make(map[int]*Signer)
+
+	// Find any signer key files (format: signer_key_X.hex)
+	for _, file := range files {
+		if !file.IsDir() && strings.HasPrefix(file.Name(), "signer_key_") && strings.HasSuffix(file.Name(), ".hex") {
+			keyPath := filepath.Join(currentDir, file.Name())
+
+			// Extract the signer number
+			numStr := strings.TrimPrefix(file.Name(), "signer_key_")
+			numStr = strings.TrimSuffix(numStr, ".hex")
+
+			var signerNum int
+			if _, err := fmt.Sscanf(numStr, "%d", &signerNum); err != nil {
+				log.Printf("Warning: Could not parse signer number from %s: %v", file.Name(), err)
+				continue
+			}
+
+			key, err := loadPrivateKey(keyPath)
+			if err != nil {
+				log.Printf("Warning: Error loading key %s: %v", file.Name(), err)
+				continue
+			}
+
+			signer, err := NewSigner(hexutil.Encode(crypto.FromECDSA(key)))
+			if err != nil {
+				log.Printf("Warning: Error creating signer from %s: %v", file.Name(), err)
+				continue
+			}
+
+			allSigners = append(allSigners, signer)
+			signerMapping[signerNum] = signer
+			fmt.Printf("Found signer #%d: %s from %s\n", signerNum, signer.GetAddress(), file.Name())
+		}
 	}
 
-	// Show address for reference
-	fmt.Printf("Using address: %s\n", signer.GetAddress())
+	if len(allSigners) == 0 {
+		log.Fatalf("No signers found. Generate at least one key.")
+	}
+
+	// Determine which signers to use based on the signers flag
+	var signers []*Signer
+	if *signersFlag != "" {
+		// Parse the comma-separated list of signer numbers
+		signerNumsStr := strings.Split(*signersFlag, ",")
+		for _, numStr := range signerNumsStr {
+			numStr = strings.TrimSpace(numStr)
+			var num int
+			if _, err := fmt.Sscanf(numStr, "%d", &num); err != nil {
+				log.Fatalf("Error parsing signer number '%s': %v", numStr, err)
+			}
+
+			if signer, ok := signerMapping[num]; ok {
+				signers = append(signers, signer)
+				fmt.Printf("Using signer #%d: %s\n", num, signer.GetAddress())
+			} else {
+				log.Fatalf("Signer #%d not found", num)
+			}
+		}
+
+		if len(signers) == 0 {
+			log.Fatalf("No valid signers specified")
+		}
+	} else {
+		// Use all available signers
+		signers = allSigners
+		for i := 0; i < len(signers); i++ {
+			// Find the signer number
+			var signerNum int
+			for num, s := range signerMapping {
+				if s == signers[i] {
+					signerNum = num
+					break
+				}
+			}
+
+			fmt.Printf("Using signer #%d: %s\n", signerNum, signers[i].GetAddress())
+		}
+	}
 
 	// Create RPC data
 	rpcData := RPCData{
@@ -431,16 +542,21 @@ func main() {
 		log.Fatalf("Error marshaling RPC data: %v", err)
 	}
 
-	// Sign the data
-	signature, err := signer.Sign(dataBytes)
+	// Create a temporary client to collect signatures
+	tempClient := &Client{
+		signers: signers,
+	}
+
+	// Collect signatures from all signers
+	signatures, err := tempClient.collectSignatures(dataBytes)
 	if err != nil {
 		log.Fatalf("Error signing data: %v", err)
 	}
 
-	// Create final RPC message with signature
+	// Create final RPC message with all signatures
 	rpcMessage := RPCMessage{
 		Req: &rpcData,
-		Sig: []string{hexutil.Encode(signature)},
+		Sig: signatures,
 	}
 
 	// Output the final message
@@ -453,7 +569,7 @@ func main() {
 
 	// If send flag is set, send the message to the server
 	if *sendFlag {
-		client, err := NewClient(*serverFlag, signer)
+		client, err := NewClient(*serverFlag, signers...)
 		if err != nil {
 			log.Fatalf("Error creating client: %v", err)
 		}
