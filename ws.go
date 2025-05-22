@@ -219,6 +219,7 @@ func (h *UnifiedWSHandler) HandleConnection(w http.ResponseWriter, r *http.Reque
 
 		var rpcResponse = &RPCMessage{}
 		var handlerErr error
+		var recordHistory = false
 
 		// Track RPC request by method
 		h.metrics.RPCRequests.WithLabelValues(msg.Req.Method).Inc()
@@ -280,7 +281,7 @@ func (h *UnifiedWSHandler) HandleConnection(w http.ResponseWriter, r *http.Reque
 				continue
 			}
 			h.sendBalanceUpdate(address)
-
+			recordHistory = true
 		case "close_app_session":
 			rpcResponse, handlerErr = HandleCloseApplication(&msg, h.db)
 			if handlerErr != nil {
@@ -289,7 +290,7 @@ func (h *UnifiedWSHandler) HandleConnection(w http.ResponseWriter, r *http.Reque
 				continue
 			}
 			h.sendBalanceUpdate(address)
-
+			recordHistory = true
 		case "get_app_sessions":
 			rpcResponse, handlerErr = HandleGetAppSessions(&msg, h.db)
 			if handlerErr != nil {
@@ -305,7 +306,7 @@ func (h *UnifiedWSHandler) HandleConnection(w http.ResponseWriter, r *http.Reque
 				h.sendErrorResponse(address, &msg, conn, "Failed to resize channel: "+handlerErr.Error())
 				continue
 			}
-
+			recordHistory = true
 		case "close_channel":
 			rpcResponse, handlerErr = HandleCloseChannel(&msg, h.db, h.signer)
 			if handlerErr != nil {
@@ -313,7 +314,7 @@ func (h *UnifiedWSHandler) HandleConnection(w http.ResponseWriter, r *http.Reque
 				h.sendErrorResponse(address, &msg, conn, "Failed to close channel: "+handlerErr.Error())
 				continue
 			}
-
+			recordHistory = true
 		case "get_channels":
 			rpcResponse, handlerErr = HandleGetChannels(&msg, h.db)
 			if handlerErr != nil {
@@ -336,14 +337,16 @@ func (h *UnifiedWSHandler) HandleConnection(w http.ResponseWriter, r *http.Reque
 		}
 
 		// For broker methods, send back a signed RPC response.
-		byteData, _ := json.Marshal(rpcResponse.Req)
+		byteData, _ := json.Marshal(rpcResponse.Res)
 		signature, _ := h.signer.Sign(byteData)
 		rpcResponse.Sig = []string{hexutil.Encode(signature)}
 		wsResponseData, _ := json.Marshal(rpcResponse)
 
-		if err := h.rpcStore.StoreMessage(address, msg.Req, msg.Sig, byteData, rpcResponse.Sig); err != nil {
-			log.Printf("Failed to store RPC message: %v", err)
-			// continue processing even if storage fails
+		if recordHistory {
+			if err := h.rpcStore.StoreMessage(address, msg.Req, msg.Sig, byteData, rpcResponse.Sig); err != nil {
+				log.Printf("Failed to store RPC message: %v", err)
+				// continue processing even if storage fails
+			}
 		}
 
 		// Use NextWriter for safer message delivery

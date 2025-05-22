@@ -2,30 +2,14 @@
 
 This directory contains tools for testing the Clearnode API by creating properly signed RPC messages and interacting with the Clearnode server.
 
-## Overview
-
-The testing toolkit consists of:
-
-1. **Go Client** - A command-line utility for creating and sending signed RPC messages
-2. **Interactive Shell Script** - A bash-based interactive menu for common testing operations
-
-These tools automatically handle authentication, private key management, and message signing according to the Clearnode protocol.
+The tool automatically handle authentication, private key management, and message signing according to the Clearnode protocol.
 
 ## Quick Start
 
-For most testing scenarios, use the interactive test script:
-
 ```bash
-# Set a custom server (optional)
-export SERVER="ws://your-server.com:8000/ws"
+# Generate a signer key
+go run . --genkey 1    # Creates signer_key_1.hex
 
-# Run the interactive test menu
-./test_api.sh
-```
-
-Or use the Go client directly for specific operations:
-
-```bash
 # Generate a signed message only
 go run . --method ping
 
