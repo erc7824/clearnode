@@ -257,7 +257,7 @@ func (c *Client) Authenticate() error {
 			RequestID: 1,
 			Method:    "auth_request",
 			Params:    []any{c.address},
-			Timestamp: uint64(time.Now().Unix()),
+			Timestamp: uint64(time.Now().UnixMilli()),
 		},
 		Sig: []string{},
 	}
@@ -323,7 +323,7 @@ func (c *Client) Authenticate() error {
 				"address":   c.address,
 				"challenge": challengeStr,
 			}},
-			Timestamp: uint64(time.Now().Unix()),
+			Timestamp: uint64(time.Now().UnixMilli()),
 		},
 		Sig: []string{},
 	}
@@ -565,7 +565,7 @@ func main() {
 		RequestID: *idFlag,
 		Method:    *methodFlag,
 		Params:    params,
-		Timestamp: uint64(time.Now().Unix()),
+		Timestamp: uint64(time.Now().UnixMilli()),
 	}
 
 	// Serialize RPC data for signing
