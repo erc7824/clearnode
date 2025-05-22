@@ -396,7 +396,7 @@ func main() {
 		idFlag      = flag.Uint64("id", 1, "Request ID")
 		paramsFlag  = flag.String("params", "[]", "JSON array of parameters")
 		sendFlag    = flag.Bool("send", false, "Send the message to the server")
-		serverFlag  = flag.String("server", "ws://localhost:8000/ws", "WebSocket server URL")
+		serverFlag  = flag.String("server", "ws://localhost:8000/ws", "WebSocket server URL (can also be set via SERVER environment variable)")
 		genKeyFlag  = flag.String("genkey", "", "Generate a new key and exit. Use a signer number (e.g., '1', '2', '3').")
 		signersFlag = flag.String("signers", "", "Comma-separated list of signer numbers to use (e.g., '1,2,3'). If not specified, all available signers will be used.")
 		authFlag    = flag.String("auth", "", "Specify which signer to authenticate with (e.g., '1'). If not specified, first signer is used.")
@@ -404,6 +404,11 @@ func main() {
 	)
 
 	flag.Parse()
+
+	// Check if SERVER environment variable is set
+	if serverEnv := os.Getenv("SERVER"); serverEnv != "" {
+		*serverFlag = serverEnv
+	}
 
 	// Get current directory for key storage
 	currentDir, err := os.Getwd()

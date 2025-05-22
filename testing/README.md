@@ -2,7 +2,7 @@
 
 This directory contains tools for testing the Clearnode API by creating properly signed RPC messages and interacting with the Clearnode server.
 
-The tool automatically handle authentication, private key management, and message signing according to the Clearnode protocol.
+The tool automatically handles authentication, private key management, and message signing according to the Clearnode protocol.
 
 ## Quick Start
 
@@ -15,6 +15,10 @@ go run . --method ping
 
 # Send the message to the server and get a response
 go run . --method ping --send --server ws://localhost:8000/ws
+
+# Or set the server URL via environment variable
+export SERVER=wss://canarynet.yellow.com/ws
+go run . --method ping --send
 ```
 
 ## Private Key Management
@@ -89,6 +93,12 @@ go run . --method <method_name> [options]
 | `--auth` | Specify which signer to authenticate with (e.g., "1") | First signer |
 | `--nosign` | Make a request without signatures | false |
 
+### Environment Variables
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `SERVER` | WebSocket server URL (overrides default but is overridden by `--server` flag) | ws://localhost:8000/ws |
+
 ## Common Test Scenarios
 
 ### Authentication & Signature Options
@@ -109,6 +119,9 @@ go run . --method ping --send --auth 2 --signers 1,3
 ```bash
 # Ping the server
 go run . --method ping --send --server ws://localhost:8000/ws
+
+# Using environment variable for server URL
+SERVER=ws://testnet.example.com/ws go run . --method ping --send
 
 # Get server configuration
 go run . --method get_config --send --server ws://localhost:8000/ws
