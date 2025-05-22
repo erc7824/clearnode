@@ -40,7 +40,7 @@ func CreateResponse(id uint64, method string, responseParams []any, newTimestamp
 			RequestID: id,
 			Method:    method,
 			Params:    responseParams,
-			Timestamp: uint64(newTimestamp.Unix()),
+			Timestamp: uint64(newTimestamp.UnixMilli()),
 		},
 		Sig: []string{},
 	}
