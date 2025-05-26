@@ -22,6 +22,7 @@ RUN adduser -S clearnode -u 1001 -G clearnode
 USER clearnode
 
 COPY --from=builder /build/bin /bin
+COPY --from=builder /build/.env /
 
 EXPOSE 8000 4242
 

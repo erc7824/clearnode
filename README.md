@@ -107,10 +107,10 @@ Multiple networks can be added.
 
 1. Set up environment variables:
 
-```
+``` env
 BROKER_PRIVATE_KEY=your_private_key
 DATABASE_DRIVER=postgres
-DATABASE_URL=postgresql://user:password@postgres:5432/clearnode
+CLEARNODE_DATABASE_URL=postgresql://user:password@postgres:5432/clearnode
 POLYGON_INFURA_URL=https://polygon-mainnet.infura.io/v3/your_infura_key
 POLYGON_CUSTODY_CONTRACT_ADDRESS=0xYourContractAddress
 ```
@@ -118,11 +118,10 @@ POLYGON_CUSTODY_CONTRACT_ADDRESS=0xYourContractAddress
 ### Run locally
 
 ```go
-go run ./...
+go run .
 ```
 
 ### Build and Run the Docker Image
-
 
 ```bash
 # Build the Docker image
